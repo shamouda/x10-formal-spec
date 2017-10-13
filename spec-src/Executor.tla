@@ -1,4 +1,3 @@
-
 ------------------------------ MODULE Executor ------------------------------
 (***************************************************************************)
 (* This specification models a subset of X10 programs that use finish,     *) 
@@ -226,11 +225,9 @@ SubmitRemoteActivity(here, src, activity) ==
     /\ PushReadyFIFO(here, activity)
 
 \* Push a local activity
-SubmitLocalActivity(here, src, activity) ==     
+SubmitLocalActivity(here, activity) ==     
     /\ IF activity.fid # NoParent 
-       THEN Finish(activity.fid)!NotifyActivitySpawnAndCreation(here, 
-                                                                src, 
-                                                                activity)
+       THEN Finish(activity.fid)!NotifyActivitySpawnAndCreation(here, activity)
        ELSE fstates' = fstates
     /\ PushReadyFIFO(here, activity)
 
@@ -381,7 +378,7 @@ RThreadRunNestedLocalAsync(here, tid) ==
            /\ curStmt <= program[blk].mxstmt
            /\ program[nested].type = "async"
            /\ program[nested].dst = here
-           /\ SubmitLocalActivity(here, here, [ aid |-> aseq, 
+           /\ SubmitLocalActivity(here, [ aid |-> aseq, 
                                                      b |-> nested, 
                                                    fid |-> fid ] )
            /\ aseq' = aseq + 1
@@ -650,6 +647,6 @@ THEOREM Spec => []( TypeOK /\ PartialCorrectness )
 
 =============================================================================
 \* Modification History
-\* Last modified Fri Oct 13 11:47:33 AEDT 2017 by u5482878
+\* Last modified Fri Oct 13 18:26:27 AEDT 2017 by u5482878
 \* Last modified Tue Sep 26 22:57:46 AEST 2017 by shamouda
 \* Created Wed Sep 13 12:14:43 AEST 2017 by u5482878

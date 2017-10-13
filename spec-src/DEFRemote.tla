@@ -27,10 +27,10 @@ NotifySubActivitySpawnError(dst) == FALSE
 NotifyActivityCreation(src, activity) == 
     /\ fstates' = [fstates EXCEPT ![fid].count = @+1] 
 
-NotifyActivitySpawnAndCreation (dst, src, activity) ==
-    /\ IF fstates[fid].here = dst
+NotifyActivitySpawnAndCreation (here, activity) ==
+    /\ IF fstates[fid].here = here
        THEN fstates' = [fstates EXCEPT ![fid].count = @+1,
-                                       ![fid].remActs[dst] = @+1 ] 
+                                       ![fid].remActs[here] = @+1 ] 
        ELSE fstates' = fstates
 
 NotifyActivityTermination ==

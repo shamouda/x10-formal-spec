@@ -37,16 +37,16 @@ NotifySubActivitySpawnError(dst) ==
             /\ DefaultRemote!NotifySubActivitySpawnError(dst)
 
 \*needed for the local path of Runtime.runAsync
-NotifyActivitySpawnAndCreation (dst, src, act) ==
+NotifyActivitySpawnAndCreation (here, act) ==
     /\  fstates[fid].status = "waiting"
     /\  \/  /\ fstates[fid].type = "SPMDroot" 
-            /\ SPMDRoot!NotifyActivitySpawnAndCreation(dst, src, act)
+            /\ SPMDRoot!NotifyActivitySpawnAndCreation(here, act)
         \/  /\ fstates[fid].type = "SPMDremote" 
-            /\ SPMDRemote!NotifyActivitySpawnAndCreation(dst, src, act)
+            /\ SPMDRemote!NotifyActivitySpawnAndCreation(here, act)
         \/  /\ fstates[fid].type = "root" 
-            /\ DefaultRoot!NotifyActivitySpawnAndCreation(dst, src, act)
+            /\ DefaultRoot!NotifyActivitySpawnAndCreation(here, act)
         \/  /\ fstates[fid].type = "remote" 
-            /\ DefaultRemote!NotifyActivitySpawnAndCreation(dst, src, act)
+            /\ DefaultRemote!NotifyActivitySpawnAndCreation(here, act)
 
 NotifyActivityCreation(src, act) ==
     /\  fstates[fid].status = "waiting" 

@@ -27,8 +27,8 @@ NotifySubActivitySpawnError(dst) == FALSE
 NotifyActivityCreation(src, activity) == 
     fstates' = fstates
 
-NotifyActivitySpawnAndCreation (dst, src, activity) ==
-    NotifySubActivitySpawn(dst)  
+NotifyActivitySpawnAndCreation (here, activity) ==
+    NotifySubActivitySpawn(here)  
 
 LastActivity ==
     /\ fstates[fid].count = 1

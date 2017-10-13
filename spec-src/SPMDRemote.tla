@@ -29,8 +29,8 @@ NotifySubActivitySpawnError(dst) ==
 NotifyActivityCreation(src, activity) == 
     /\ fstates' = fstates  \* always true in SPMD finish
 
-NotifyActivitySpawnAndCreation (dst, src, activity) == 
-    /\ fstates[fid].here = dst
+NotifyActivitySpawnAndCreation (here, activity) == 
+    /\ fstates[fid].here = here
     /\ fstates' = [fstates EXCEPT ![fid].count = @+1]
 
 LastActivity ==
