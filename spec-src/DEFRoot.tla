@@ -1,12 +1,13 @@
 ------------------------------ MODULE DEFRoot ------------------------------
-(*******************************************************************************)
-(* TODO: Root must clean the remote objects. Remote objects should be reusable *)
-(*******************************************************************************)
-VARIABLES fid, fstates, msgs, thrds
+(***************************************************************************)
+(* The default root finish imeplementation                                 *)
+(* See FinishState.RootFinish for the actual implementation                *)
+(***************************************************************************)
+VARIABLES fid, fstates, msgs, thrds, mseq, p0adoptSet
 CONSTANTS PLACE, MXFINISHES, PROG_HOME, MXTHREADS, NBLOCKS, MXSTMTS
 INSTANCE Commons
 ----------------------------------------------------------------------------
-Alloc(type, here, root) ==
+Alloc(type, here, parent, root) == \* parent not used here
    /\ fstates[fid].status = "unused"
    /\ fstates' = [fstates EXCEPT ![fid].id = fid,
                                  ![fid].count = 1, 
@@ -24,10 +25,11 @@ NotifySubActivitySpawn(dst) ==
 
 NotifySubActivitySpawnError(dst) == FALSE
     
-NotifyActivityCreation(src, activity) == 
-    fstates' = fstates
+NotifyRemoteActivityCreation(src, activity, inMsg) == 
+    /\ fstates' = fstates
+    /\ RecvMsg (inMsg)
 
-NotifyActivitySpawnAndCreation (here, activity) ==
+NotifyLocalActivitySpawnAndCreation (here, activity) ==
     NotifySubActivitySpawn(here)  
 
 LastActivity ==
@@ -44,8 +46,11 @@ NotifyActivityTermination ==
 PushException(e) == 
     /\ fstates' = [fstates EXCEPT ![fid].excs = Append(@, e)]
 
-SendTermMsg(mid) == FALSE  \* root doesn't need this action
-
+SendTermMsg ==
+    /\ fstates' = [fstates EXCEPT ![fid].status = "forgotten"]
+    /\ msgs' = msgs
+    /\ mseq' = mseq
+    
 LastActivity2(here, msgRemActs) ==
     /\ fstates[fid].count + msgRemActs[here] = 0
     /\ \A p \in PLACE \ {here}: fstates[fid].remActs[p] + msgRemActs[p] = 0
@@ -72,5 +77,5 @@ ProcessChildTermMsg(msg) ==
         /\ RecvMsg (msg)
 =============================================================================
 \* Modification History
-\* Last modified Thu Oct 12 20:17:47 AEDT 2017 by u5482878
+\* Last modified Mon Nov 06 19:13:06 AEDT 2017 by u5482878
 \* Created Wed Sep 13 12:16:49 AEST 2017 by u5482878

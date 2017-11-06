@@ -1,13 +1,14 @@
 ----------------------------- MODULE DEFRemote -----------------------------
-(*******************************************************************************)
-(* TODO: Root must clean the remote objects. Remote objects should be reusable *)
-(*******************************************************************************)
+(***************************************************************************)
+(* The default root finish imeplementation                                 *)
+(* See FinishState.RemoteFinish for the actual implementation              *)
+(***************************************************************************)
 EXTENDS Sequences, Integers
-VARIABLES fid, fstates, msgs, thrds
+VARIABLES fid, fstates, msgs, thrds, mseq, p0adoptSet
 CONSTANTS PLACE, MXFINISHES, PROG_HOME, MXTHREADS, NBLOCKS, MXSTMTS
 INSTANCE Commons
 ----------------------------------------------------------------------------
-Alloc(type, here, root) == 
+Alloc(type, here, parent, root) == \* parent not used here
    /\ fstates[fid].status \in { "unused", "forgotten" }
    /\ fstates' = [fstates EXCEPT ![fid].id = fid,
                                  ![fid].count = 0, 
@@ -24,10 +25,11 @@ NotifySubActivitySpawn(dst) ==
 
 NotifySubActivitySpawnError(dst) == FALSE
     
-NotifyActivityCreation(src, activity) == 
-    /\ fstates' = [fstates EXCEPT ![fid].count = @+1] 
+NotifyRemoteActivityCreation(src, activity, inMsg) == 
+    /\ fstates' = [fstates EXCEPT ![fid].count = @+1]
+    /\ RecvMsg (inMsg) 
 
-NotifyActivitySpawnAndCreation (here, activity) ==
+NotifyLocalActivitySpawnAndCreation (here, activity) ==
     /\ IF fstates[fid].here = here
        THEN fstates' = [fstates EXCEPT ![fid].count = @+1,
                                        ![fid].remActs[here] = @+1 ] 
@@ -46,23 +48,25 @@ NotifyActivityTermination ==
 PushException(e) == 
     /\ fstates' = [fstates EXCEPT ![fid].excs = Append(@, e)]
 
-SendTermMsg(mid) ==
+SendTermMsg ==
    LET pid == fstates[fid].root
        pidHome == GetFinishHome(pid) 
        here == fstates[fid].here
-   IN  /\ fstates' = [fstates EXCEPT ![fid].status = "forgotten"]
-       /\ SendMsg ([ mid |-> mid, 
+   IN  /\ pidHome # here
+       /\ fstates' = [fstates EXCEPT ![fid].status = "forgotten"]
+       /\ SendMsg ([ mid |-> mseq, 
                      src |-> here, 
                      dst |-> pidHome, 
                      type |-> "asyncTerm", 
                      fid |-> pid, 
                      remActs |-> fstates[fid].remActs, 
                      excs |-> fstates[fid].excs])
+       /\ mseq' = mseq + 1
 
 ProcessChildTermMsg(msg) == FALSE  \* remote does't need this action
 
 =============================================================================
 \* Modification History
-\* Last modified Thu Oct 12 20:18:39 AEDT 2017 by u5482878
+\* Last modified Mon Nov 06 19:13:20 AEDT 2017 by u5482878
 \* Last modified Tue Sep 26 23:12:25 AEST 2017 by shamouda
 \* Created Wed Sep 13 12:17:03 AEST 2017 by u5482878

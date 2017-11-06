@@ -1,11 +1,15 @@
 ---------------------------- MODULE SPMDRemote ----------------------------
+(***************************************************************************)
+(* A Single Program Multi Data remote finish                               *)
+(* See FinishState.RemoteFinishSPMD for the actual implementation          *)
+(***************************************************************************)
 EXTENDS Sequences, Integers
 ---------------------------------------------------------------------------
-VARIABLES fid, fstates, msgs, thrds
+VARIABLES fid, fstates, msgs, thrds, mseq,p0adoptSet
 CONSTANTS PLACE, MXFINISHES, PROG_HOME, MXTHREADS, NBLOCKS, MXSTMTS
 INSTANCE Commons
 ---------------------------------------------------------------------------
-Alloc(type, here, root) ==
+Alloc(type, here, parent, root) == \* parent not used here
    /\ fstates[fid].status = "unused"
    /\ fstates' = [fstates EXCEPT ![fid].id = fid,
                                  ![fid].count = 1, 
@@ -26,10 +30,11 @@ NotifySubActivitySpawnError(dst) ==
     /\ PushException([ err |-> "SpawnRemoteAsync", 
                        from |-> fstates[fid].here ])
 
-NotifyActivityCreation(src, activity) == 
+NotifyRemoteActivityCreation(src, activity, inMsg) == 
     /\ fstates' = fstates  \* always true in SPMD finish
+    /\ RecvMsg (inMsg)
 
-NotifyActivitySpawnAndCreation (here, activity) == 
+NotifyLocalActivitySpawnAndCreation (here, activity) == 
     /\ fstates[fid].here = here
     /\ fstates' = [fstates EXCEPT ![fid].count = @+1]
 
@@ -43,21 +48,23 @@ NotifyActivityTermination ==
                                        ![fid].status = "finished"]
        ELSE fstates' = [fstates EXCEPT ![fid].count = @-1]
        
-SendTermMsg(mid) ==
+SendTermMsg ==
    LET pid == fstates[fid].root
        pidHome == GetFinishHome(pid) 
        here == fstates[fid].here
-   IN  /\ fstates' = [fstates EXCEPT ![fid].status = "forgotten"]
-       /\ SendMsg ([ mid |-> mid, 
+   IN  /\ pidHome # here
+       /\ fstates' = [fstates EXCEPT ![fid].status = "forgotten"]
+       /\ SendMsg ([ mid |-> mseq, 
                      src |-> here, 
                      dst |-> pidHome , 
                     type |-> "asyncTerm", 
                      fid |-> pid, 
                      excs |-> fstates[fid].excs ])
+       /\ mseq' = mseq + 1
 
 ProcessChildTermMsg(msg) == FALSE  \* remote does't need this action
     
 =============================================================================
 \* Modification History
-\* Last modified Thu Oct 12 20:13:26 AEDT 2017 by u5482878
+\* Last modified Mon Nov 06 19:13:53 AEDT 2017 by u5482878
 \* Created Wed Sep 13 12:16:19 AEST 2017 by u5482878

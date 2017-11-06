@@ -1,11 +1,15 @@
 ----------------------------- MODULE SPMDRoot -----------------------------
+(***************************************************************************)
+(* A Single Program Multi Data root finish                                 *)
+(* See FinishState.RootFinishSPMD for the actual implementation            *)
+(***************************************************************************)
 EXTENDS Sequences, Integers
 ---------------------------------------------------------------------------
-VARIABLES fid, fstates, msgs, thrds
+VARIABLES fid, fstates, msgs, thrds, mseq,p0adoptSet
 CONSTANTS PLACE, MXFINISHES, PROG_HOME, MXTHREADS, NBLOCKS, MXSTMTS
 INSTANCE Commons
 ---------------------------------------------------------------------------
-Alloc(type, here, root) ==
+Alloc(type, here, parent, root) == \* parent not used here
    /\ fstates[fid].status = "unused"
    /\ fstates' = [fstates EXCEPT ![fid].id = fid,
                                  ![fid].count = 1, 
@@ -19,10 +23,11 @@ NotifySubActivitySpawn(dst) ==
 
 NotifySubActivitySpawnError(dst) == FALSE
 
-NotifyActivityCreation(src, activity) == 
+NotifyRemoteActivityCreation(src, activity, inMsg) == 
     /\ fstates' = fstates  \* always true in SPMD finish
+    /\ RecvMsg (inMsg)
 
-NotifyActivitySpawnAndCreation (here, activity) == 
+NotifyLocalActivitySpawnAndCreation (here, activity) == 
     /\ fstates' = [fstates EXCEPT ![fid].count = @+1]
 
 LastActivity ==
@@ -48,7 +53,10 @@ NotifyActivityTerminationExcs(excs) ==
 PushException(e) == 
     /\ fstates' = [fstates EXCEPT ![fid].excs = Append(@, e)]
 
-SendTermMsg(mid) == FALSE  \* root doesn't need this action
+SendTermMsg ==
+    /\ fstates' = [fstates EXCEPT ![fid].status = "forgotten"]
+    /\ msgs' = msgs
+    /\ mseq' = mseq
 
 ProcessChildTermMsg(msg) ==
     LET here == fstates[fid].here
@@ -59,5 +67,5 @@ ProcessChildTermMsg(msg) ==
 
 =============================================================================
 \* Modification History
-\* Last modified Thu Oct 12 20:18:03 AEDT 2017 by u5482878
+\* Last modified Mon Nov 06 19:13:59 AEDT 2017 by u5482878
 \* Created Wed Sep 13 12:16:33 AEST 2017 by u5482878
