@@ -26,21 +26,7 @@ AddTransitAdopted(fid, pfid, root, rootPlace, src, target) ==
 AddTransit(fid, pfid, root, rootPlace, src, target) ==
    IF p0fstates[fid].adopterId = NotID           
    THEN IF p0fstates[fid].id = NotID \* not yet initialized
-        THEN  IF pfid > NoParent /\ p0fstates[pfid].id = NotID
-              THEN p0fstates' = [p0fstates EXCEPT ![fid].id = fid,
-                                             ![fid].parent = pfid,
-                                             ![fid].gfsRoot = root,
-                                             ![fid].gfsRootPlace = rootPlace,
-                                             ![fid].numActive = @ + 2,
-                                             ![fid].transit[src][target] = @ + 1,
-                                             ![fid].live[rootPlace] = @ + 1,
-                                             ![pfid].id =  pfid,
-                                             ![pfid].parent = fstates[pfid].parent,
-                                             ![pfid].gfsRoot = fstates[pfid].root,
-                                             ![pfid].gfsRootPlace = fstates[fstates[pfid].root].here,
-                                             ![pfid].numActive = 1,
-                                             ![pfid].live[fstates[pfid].here] = 1] \* root finish's task
-              ELSE p0fstates' = [p0fstates EXCEPT ![fid].id = fid,
+        THEN  p0fstates' = [p0fstates EXCEPT ![fid].id = fid,
                                              ![fid].parent = pfid,
                                              ![fid].gfsRoot = root,
                                              ![fid].gfsRootPlace = rootPlace,

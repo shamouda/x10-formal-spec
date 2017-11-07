@@ -65,12 +65,8 @@ SendLiveToCompleted ==
     /\ mseq' = mseq + 1
 
 NotifySubActivitySpawn(dst) ==
-    LET parentId == fstates[fid].parent
-    IN /\ IF parentId # NoParent 
-          THEN fstates' = [fstates EXCEPT ![fid].isGlobal = TRUE,
-                                          ![parentId].isGlobal = TRUE ]
-          ELSE fstates' = [fstates EXCEPT ![fid].isGlobal = TRUE]
-       /\ SendTransit(dst)
+    /\ fstates' = [fstates EXCEPT ![fid].isGlobal = TRUE ]
+    /\ SendTransit(dst)
 
 NotifySubActivitySpawnError(dst) == FALSE
 
