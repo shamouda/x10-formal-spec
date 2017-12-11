@@ -1,0 +1,63 @@
+0 finish {
+1    async at (p1) {
+2       finish {
+3          async at (p2) {
+4             async at (p0) {
+5                 kill;
+              }
+           }
+        }
+     }
+  }
+---------------------------------------------------
+PLACE == {p0, p1, p2}
+PROG_HOME == p0
+BACKUP == [ p \in PLACE |-> IF p = p0
+                  THEN p1
+                  ELSE IF p = p1
+                  THEN p2
+                  ELSE p0 ]
+DEPTH == 65
+MXFINISHES == 5
+PROG == ( 0 :>
+      [ b |-> 0,
+        type |-> "finish",
+        dst |-> p0,
+        mxstmt |-> 0,
+        stmts |-> (0 :> 1),
+        ran |-> TRUE ] @@
+  1 :>
+      [ b |-> 1,
+        type |-> "async",
+        dst |-> p1,
+        mxstmt |-> 0,
+        stmts |-> (0 :> 2),
+        ran |-> FALSE ] @@
+  2 :>
+      [ b |-> 2,
+        type |-> "finish",
+        dst |-> p1,
+        mxstmt |-> 0,
+        stmts |-> (0 :> 3),
+        ran |-> FALSE ] @@
+  3 :>
+      [ b |-> 3,
+        type |-> "async",
+        dst |-> p2,
+        mxstmt |-> 0,
+        stmts |-> (0 :> 4),
+        ran |-> FALSE ] @@
+  4 :>
+      [ b |-> 4,
+        type |-> "async",
+        dst |-> p0,
+        mxstmt |-> 0,
+        stmts |-> (0 :> 5),
+        ran |-> FALSE ] @@
+  5 :>
+      [ b |-> 5,
+        type |-> "kill",
+        dst |-> p1,
+        mxstmt |-> 0,
+        stmts |-> (0 :> -1),
+        ran |-> FALSE ] )
