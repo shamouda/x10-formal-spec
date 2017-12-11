@@ -95,10 +95,6 @@ GetRootFinishId(fid) ==
    ELSE IF Finish(fid)!IsRoot THEN fid
    ELSE fstates[fid].root
 
-P0 == PROG_HOME
-P1 == BACKUP[PROG_HOME]
-P2 == BACKUP[BACKUP[PROG_HOME]]
-
 -----------------------------------------------------------------------------
 (***************************************************************************)
 (* Invariants  (formulas true in every reachable state.)                   *)
@@ -1832,12 +1828,8 @@ Liveness ==
 Spec ==  Init /\ [][Next]_Vars /\ Liveness
 
 THEOREM Spec => []( TypeOK /\ StateOK)
-(*
--metadir /media/u5482878/DATAPART1/tla_ws/states -checkpoint 0
--metadir /Users/shamouda/tla_states -checkpoint 0
-***)
 =============================================================================
 \* Modification History
-\* Last modified Mon Dec 11 20:55:15 AEDT 2017 by u5482878
+\* Last modified Mon Dec 11 21:17:12 AEDT 2017 by u5482878
 \* Last modified Sun Dec 10 18:15:04 AEDT 2017 by shamouda
 \* Created Wed Sep 13 12:14:43 AEST 2017 by u5482878
