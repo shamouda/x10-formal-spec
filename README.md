@@ -10,4 +10,4 @@ construct: <br />
 5) An implementation that fixes the bugs in (4)   <br />
 
 We are currectly working on another implementation, that aims at reducing the communication 
-cost in (4) <br>
+cost in (5) <br>
