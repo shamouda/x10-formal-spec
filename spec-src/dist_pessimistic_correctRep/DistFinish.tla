@@ -42,10 +42,10 @@ SendMasterTransit(dst) ==
            root == fstates[fid].root
            rootPlace == GetFinishHome(fstates[fid].root)
        IN /\ SendMsg([ mid |-> seq.mseq,
-                            src |-> here, 
-                            dst |-> rootPlace, 
-                         target |-> dst, 
-                            fid |-> root, 
+                       src |-> here, 
+                       dst |-> rootPlace, 
+                    target |-> dst, 
+                       fid |-> root, 
                       type |-> "masterTransit" ])
           /\ waitForMsgs' = waitForMsgs \cup {[ src |-> rootPlace, 
                                                dst |-> here,  
@@ -62,7 +62,7 @@ SendMasterTransitToLive(src, actId, inMsg, here, root) ==
                 source |-> src,
                 target |-> here, 
                    dst |-> rootPlace, 
-                   fid |-> root, \* always refer to the root state 
+                   fid |-> root,
                    aid |-> actId,
                   type |-> "masterLive" ])
         /\ waitForMsgs' = waitForMsgs \cup {[ src |-> rootPlace, 
@@ -81,15 +81,15 @@ SendMasterLiveToCompleted(finishEnd) ==
                     src |-> here, 
                     dst |-> rootPlace, 
                  target |-> here, 
-                    fid |-> root, \* always refer to the root state
+                    fid |-> root,
               finishEnd |-> finishEnd,
                    type |-> "masterCompleted" ])
        /\ waitForMsgs' = waitForMsgs \cup {[ src |-> rootPlace, 
-                                                     dst |-> here,  
-                                                  target |-> here,
-                                                     fid |-> root,
-                                               isAdopter |-> FALSE,
-                                                    type |-> "masterCompletedDone"  ]}
+                                             dst |-> here,
+                                          target |-> here,
+                                             fid |-> root,
+                                       isAdopter |-> FALSE,
+                                            type |-> "masterCompletedDone"  ]}
        /\ IncrMSEQ(1)
 
 -----------------------------------------------------------------------------
@@ -125,7 +125,7 @@ AllocRemoteAndNotifyRemoteActivityCreation(src, act, inMsg, type, here, parent, 
     /\ Alloc(type, here, parent, root)
    
 NotifyActivityTermination(finishEnd) ==
-    /\  fstates[fid].status = "waiting" 
+    /\ fstates[fid].status = "waiting" 
     /\ fstates[fid].count > 0
     /\ IF LastActivity /\ ~fstates[fid].isGlobal
        THEN /\ fstates' = [fstates EXCEPT ![fid].count = @-1,

@@ -45,10 +45,10 @@ EXTENDS Integers, Sequences, TLC
 CONSTANTS 
     PLACE,         (* The set of places                                     *)
     PROG_HOME,     (* The home place from which the program starts          *)
-    PROG,          (* The input program as a sequence of async statements   *)
+    PROG,          (* The input program                                     *)
     MXFINISHES,    (* Maximum finish objects including root and remote      *)
     BACKUP,        (* A function from place to its backup                   *)
-    DEPTH          (* Maximum expected depth of the trance                  *)
+    DEPTH          (* Maximum expected depth of the trace                   *)
 
 -----------------------------------------------------------------------------
 (****************************************************************************)
@@ -103,7 +103,7 @@ TypeOK ==
   /\ fstates \in [ C!IDRange ->  C!FinishState] 
   /\ thrds \in  [ PLACE -> [  C!ThreadID ->  C!Thread ] ]
   /\ msgs \subseteq  C!Messages   
-  /\ pstate \in { "running", "terminated","exceptionThrown" }
+  /\ pstate \in { "running", "terminated" }
   /\ PROG \in [ C!BlockID ->  C!Block ]
   /\ PROG_HOME \in PLACE
   /\ seq \in C!Sequences
@@ -123,7 +123,7 @@ StateOK == TRUE
                 
 MustTerminate ==
   <> ( pstate = "terminated" )
-   
+ 
 -----------------------------------------------------------------------------
 (***************************************************************************)
 (* Initialization                                                          *)
@@ -133,9 +133,9 @@ Init ==
   /\ depth = 0
   /\ fstates = [ r \in  C!IDRange |-> 
                  [ id |->  C!NotID, status |-> "unused", type |->  "NA", 
-                   count |-> 0, excs |-> <<>>, here |->  C!NotPlace, 
+                   count |-> 0, here |->  C!NotPlace, 
                    parent |->  C!NotID, root |->  C!NotID, isGlobal |-> FALSE,
-                   remActs |-> [ p \in PLACE |-> 0 ], eroot |-> C!NotID ]]
+                   eroot |-> C!NotID ]]
   /\ fmasters = [ r \in  C!IDRange  |-> 
                         [  id |-> C!NotID,
                     numActive |-> 0,
@@ -160,7 +160,7 @@ Init ==
                                          lastKilled |-> C!NotPlace ] ] 
   /\ msgs    = {}
   /\ seq     = [ aseq |-> 1, fseq |-> C!FIRST_ID, mseq |-> 1]
-  /\ thrds = [ p \in PLACE |-> 
+  /\ thrds = [ p \in PLACE |->  \*start with one running thread at PROG_HOME
                [ t \in  C!ThreadID |-> 
                    IF p = PROG_HOME /\ t = 0 
                    THEN [ tid |-> t, status |-> "running", 
@@ -173,11 +173,11 @@ Init ==
                    ELSE [ tid |-> t, status |-> "idle", 
                           blockingType |-> "NA", 
                           stack |-> <<>> ] ] ]
+  /\ runningThrds = { [here |-> PROG_HOME, tid |-> 0 ] }
+  /\ blockedThrds = {}
   /\ killed = {}
   /\ pendingAct = {}
   /\ waitForMsgs = {}
-  /\ runningThrds = { [here |-> PROG_HOME, tid |-> 0 ] }
-  /\ blockedThrds = {}
   /\ adoptSet = {}
   /\ convertSet = {}
   
@@ -429,18 +429,19 @@ Kill (dead) ==
   /\ IF adoptSet' = {}
      THEN /\ mastersStatus' = [ mastersStatus EXCEPT ![PROG_HOME].status = "convertDead",
                                                      ![PROG_HOME].lastKilled = dead]
-          /\ convertSet' =  convertSet \cup { t \in C!ConvTask :  
-                                                /\ t.pl # C!NotPlace
-                                                /\ t.pl # dead
-                                                /\ t.pl \notin killed
-                                                /\ t.fid = C!FIRST_ID
-                                                /\ t.here = PROG_HOME }
      ELSE /\ mastersStatus' = [ p \in PLACE |-> IF \E m \in adoptSet' : m.here = p 
                                                 THEN [     status |-> "seekAdoption", 
                                                        lastKilled |-> dead] 
                                                 ELSE [     status |-> "running", 
                                                        lastKilled |-> C!NotPlace] ]
-          /\ convertSet' =  convertSet
+  /\ convertSet' = { t \in C!ConvTask :  
+                       /\ t.pl # C!NotPlace
+                       /\ t.pl # dead
+                       /\ t.pl \notin killed
+                       /\ t.fid \in { id \in C!IDRange: 
+                                         /\ fmasters[id].id # C!NotID
+                                         /\ fstates[id].here # dead }
+                       /\ t.here = fstates[t.fid].here } 
   /\ LET delMsgs == { m \in msgs : m.dst = dead  }   \*delete messages going to a dead place  
          wfm == { m \in waitForMsgs: m.dst = dead }  \*delete waitForMsgs to a dead place
       IN /\ msgs' = msgs \ delMsgs            
@@ -611,6 +612,11 @@ MasterTransitDone ==
            IN /\ SetActionNameAndDepth ( << "MasterTransitDone" , here, 
                                             "success", success, 
                                             "submit", submit >> ) 
+              \* Technically, we should check the condition rootPlace \notin killed
+              \* if success is true. we should communicate with the backup normally.
+              \* the backup then should reject the request and notify the requester
+              \* that the master has changed, so that we redirect the call to the
+              \* new master.
               /\ IF success /\ submit /\ rootPlace \notin killed
                  THEN /\ C!ReplaceMsg ( msg, [   mid |-> seq.mseq, 
                                                  src |-> here, 
@@ -696,6 +702,11 @@ MasterLiveDone ==
            IN  /\ SetActionNameAndDepth ( << "MasterLiveDone", here >> )
                /\ activity # C!NotActivity
                /\ fstates[activity.fid].here = here
+               \* Technically, we should check the condition rootPlace \notin killed
+               \* if success is true. we should communicate with the backup normally.
+               \* the backup then should reject the request and notify the requester
+               \* that the master has changed, so that we redirect the call to the
+               \* new master.
                /\ IF success /\ submit /\ rootPlace \notin killed
                   THEN /\ C!ReplaceMsg ( msg , [   mid |-> seq.mseq, 
                                                src |-> here, 
@@ -759,6 +770,11 @@ MasterCompletedDone ==
                            isAdopter |-> isAdopter,
                                 type |-> "backupCompletedDone"  ]
            IN /\ SetActionNameAndDepth ( << "MasterCompletedDone", here >> )
+              \* Technically, we should check the condition rootPlace \notin killed
+              \* if success is true. we should communicate with the backup normally.
+              \* the backup then should reject the request and notify the requester
+              \* that the master has changed, so that we redirect the call to the
+              \* new master.
               /\ IF success /\ rootPlace \notin killed
                  THEN /\ C!ReplaceMsg ( msg ,[ mid |-> seq.mseq,
                                                src |-> here, 
@@ -792,15 +808,6 @@ MasterCompletedDone ==
                   blockedThrds, runningThrds >>
 
 -------------------------------------------------------------------------------------
-FindBlockedThreadGetAdopterDone ==
-  LET tset == { t \in blockedThrds : 
-                  /\ t.here \notin killed
-                  /\ thrds[t.here][t.tid].status = "blocked"
-                  /\ thrds[t.here][t.tid].blockingType = "AsyncTransit"
-                  /\ C!FindIncomingMSG(t.here, "backupGetAdopterDone") # C!NotMessage  }
-  IN IF tset = {} THEN C!NotPlaceThread
-     ELSE CHOOSE x \in tset : TRUE
-       
 GetAdopterDone ==
   /\ pstate = "running"
   /\ msgs # {}
@@ -895,7 +902,8 @@ UnblockTerminateAsync ==
               /\ IF  blk = 0
                  THEN pstate' = "terminated"
                  ELSE pstate' = pstate
-  /\ UNCHANGED << convertSet, adoptSet, mastersStatus, fstates,seq, msgs, 
+              /\ C!RecvMsg ( msg )
+  /\ UNCHANGED << convertSet, adoptSet, mastersStatus, fstates, seq, 
                   killed, pendingAct, fmasters, fbackups>>
                     
 --------------------------------------------------------------------------------------
@@ -931,12 +939,13 @@ AuthorizeTransitAsync ==
                realFID == IF msg.adoptedFID # C!NotID THEN msg.adoptedFID ELSE root
            IN /\ SetActionNameAndDepth ( << "AuthorizeTransitAsync" , here, "to", 
                                             asyncDst, "success", success >> )
-              /\ C!ReplaceMsg ( msg , [ mid |-> seq.mseq, 
-                                        src |-> here, 
-                                        dst |-> asyncDst, 
-                                       type |-> "async", 
-                                        fid |-> realFID, 
-                                          b |-> nested ])
+              /\ C!ReplaceMsg ( msg ,
+                       [ mid |-> seq.mseq,
+                         src |-> here,
+                         dst |-> asyncDst,
+                        type |-> "async",
+                         fid |-> realFID,
+                           b |-> nested ])
               /\ C!IncrMSEQ(1)
               /\ thrds' = [thrds EXCEPT  ![here][tid].status = "running",
                                          ![here][tid].stack = 
@@ -970,7 +979,6 @@ AuthorizeReceivedAsync ==
                success == msg.success
                rootPlace == C!GetFinishHome(root)
            IN /\ SetActionNameAndDepth ( << "AuthorizeReceivedAsync", here, "success", success >> )
-              /\ msg # C!NotMessage
               /\ activity # C!NotActivity
               /\ fstates[activity.fid].here = here
               /\ waitForMsgs' = waitForMsgs \ {[ src |-> backupPlace, 
@@ -1092,10 +1100,11 @@ MasterTransit ==
                                                 adoptedFID |-> C!NotID,
                                                backupPlace |-> backupPlace ]) 
                             /\ C!IncrMSEQ(1)
-  /\ UNCHANGED << waitForMsgs, convertSet, adoptSet, mastersStatus, fstates, pstate,
-                  thrds, killed, pendingAct,  fbackups,
+  /\ UNCHANGED << waitForMsgs, convertSet, adoptSet, mastersStatus, 
+                  fstates, pstate, thrds, killed, pendingAct, fbackups,
                   blockedThrds, runningThrds >>
 
+----------------------------------------------------------------------------------                    
 MasterLive ==
   /\ pstate = "running"
   /\ msgs # {}
@@ -1138,6 +1147,7 @@ MasterLive ==
                    thrds,  waitForMsgs, killed, pendingAct,  fbackups,
                    blockedThrds, runningThrds >>
 
+----------------------------------------------------------------------------------
 MasterCompleted ==
   /\ pstate = "running"
   /\ msgs # {}
@@ -1346,7 +1356,7 @@ AdopterCompleted ==
 -------------------------------------------------------------------------------
 (***************************************************************************)
 (* Finish backup replica actions                                           *)
-(***************************************************************************)     
+(***************************************************************************)
 BackupGetAdopter == 
   /\ pstate = "running"
   /\ msgs # {}
@@ -1430,9 +1440,9 @@ BackupTransit ==
                                           isAdopter |->isAdopter,
                                          adoptedFID |-> adoptedFID])
                       /\ C!IncrMSEQ(1)
-     /\ UNCHANGED << convertSet, adoptSet, mastersStatus, fstates, pstate, 
-                     thrds, killed, pendingAct, fmasters, waitForMsgs,
-                     blockedThrds, runningThrds >>
+  /\ UNCHANGED << convertSet, adoptSet, mastersStatus, fstates, pstate, 
+                  thrds, killed, pendingAct, fmasters, waitForMsgs,
+                  blockedThrds, runningThrds >>
 
 BackupLive ==
   /\ pstate = "running"
@@ -1534,7 +1544,7 @@ BackupCompleted ==
                                               success |-> TRUE] )
                       /\ C!IncrMSEQ(1)
   /\ UNCHANGED << convertSet, adoptSet, mastersStatus, fstates, pstate,
-                  thrds, killed, pendingAct,  fmasters, waitForMsgs,
+                  thrds, killed, pendingAct, fmasters, waitForMsgs,
                   blockedThrds, runningThrds >>
 
 ------------------------------------------------------------------------------
@@ -1542,8 +1552,8 @@ BackupCompleted ==
 (* Finish adoption actions for recovery                                    *)
 (***************************************************************************)
 GetAdoptionSeeker ==
-    IF adoptSet = {} THEN C!NotAdopter
-    ELSE CHOOSE m \in adoptSet : mastersStatus[m.here].status = "seekAdoption"
+  IF adoptSet = {} THEN C!NotAdopter
+  ELSE CHOOSE m \in adoptSet : mastersStatus[m.here].status = "seekAdoption"
     
 SeekAdoption ==
   /\ pstate = "running"
@@ -1567,21 +1577,16 @@ SeekAdoption ==
                                                                      + fbackups[child].transit[p][q] ] ],
                                                ![adopter].numActive = @ + fbackups[child].numActive ] 
               /\ adoptSet' = adoptSet \ {pair}
-              /\ convertSet' =  convertSet \cup { t \in C!ConvTask :  
-                                                    /\ t.pl # C!NotPlace
-                                                    /\ t.pl \notin killed
-                                                    /\ t.fid = adopter
-                                                    /\ t.here = here }
               /\ IF \E m \in adoptSet' : m.here = here
                  THEN /\ mastersStatus' = mastersStatus
                  ELSE /\ mastersStatus' = [ mastersStatus EXCEPT ![here].status = "convertDead"]
    /\ UNCHANGED << fstates, msgs, pstate,seq, thrds, killed, pendingAct,  waitForMsgs, 
-                   blockedThrds, runningThrds >> 
+                   convertSet, blockedThrds, runningThrds >> 
 
 ------------------------------------------------------------------------------------------------
 GetConvertSeeker ==
-    IF convertSet = {} THEN C!NotConvTask
-    ELSE CHOOSE m \in convertSet : mastersStatus[m.here].status = "convertDead"
+  IF convertSet = {} THEN C!NotConvTask
+  ELSE CHOOSE m \in convertSet : mastersStatus[m.here].status = "convertDead"
        
 ConvertDeadActivities ==
   /\ pstate = "running"
@@ -1653,7 +1658,8 @@ SimulateFailedResponse ==
                                      /\ m.type = msg.type /\ m.src = msg.src 
                                      /\ m.dst = msg.dst /\ m.fid = msg.fid 
                                      /\ m.aid = msg.aid /\ m.success )
-                         THEN /\ msgs' = (msgs \ delMsgs) \cup {[   mid |-> seq.mseq, 
+                         THEN /\ msgs' = (msgs \ delMsgs) \cup {
+                                        [   mid |-> seq.mseq, 
                                             src |-> msg.src, 
                                             dst |-> msg.dst,
                                          source |-> msg.source,
@@ -1664,7 +1670,7 @@ SimulateFailedResponse ==
                                          submit |-> FALSE,
                                         success |-> FALSE,
                                       isAdopter |-> FALSE,
-                                      adoptedFID |-> C!NotID,
+                                     adoptedFID |-> C!NotID,
                                     backupPlace |-> C!NotPlace ]} 
                          ELSE /\ msgs' = (msgs \ delMsgs) 
                     ELSE IF msg.type = "masterCompletedDone"
@@ -1673,79 +1679,84 @@ SimulateFailedResponse ==
                                      /\ m.dst = msg.dst /\ m.fid = msg.fid 
                                      /\ m.isAdopter = msg.isAdopter 
                                      /\ m.success )
-                         THEN  /\ msgs' = (msgs \ delMsgs) \cup {[   mid |-> seq.mseq,  
-                                                src |-> msg.src, 
-                                                dst |-> msg.dst,
-                                             target |-> msg.target,
-                                                fid |-> msg.fid,
-                                               type |-> "masterCompletedDone",
-                                            success |-> FALSE,
-                                          isAdopter |-> FALSE,
-                                          finishEnd |-> FALSE,
-                                        backupPlace |-> C!NotPlace ] }
+                         THEN  /\ msgs' = (msgs \ delMsgs) \cup {
+                                        [   mid |-> seq.mseq,
+                                            src |-> msg.src,
+                                            dst |-> msg.dst,
+                                         target |-> msg.target,
+                                            fid |-> msg.fid,
+                                           type |-> "masterCompletedDone",
+                                        success |-> FALSE,
+                                      isAdopter |-> FALSE,
+                                      finishEnd |-> FALSE,
+                                    backupPlace |-> C!NotPlace ] }
                          ELSE  /\ msgs' = (msgs \ delMsgs) 
-                    ELSE IF msg.type = "masterTransitDone"    
+                    ELSE IF msg.type = "masterTransitDone"
                     THEN IF ~ (\E m \in msgs: \*message has been sent already
                                     /\ m.type = msg.type /\ m.src = msg.src 
                                     /\ m.dst = msg.dst /\ m.fid = msg.fid 
                                     /\ m.success )
-                         THEN  /\ msgs' = (msgs \ delMsgs) \cup {[   mid |-> seq.mseq, 
-                                                src |-> msg.src, 
-                                                dst |-> msg.dst,
-                                             target |-> msg.target,
-                                                fid |-> msg.fid,
-                                               type |-> "masterTransitDone",
-                                          isAdopter |-> FALSE,
-                                          adoptedFID |-> C!NotID,
-                                        backupPlace |-> C!NotPlace,
-                                            submit  |-> FALSE,
-                                            success |-> FALSE ] }
+                         THEN  /\ msgs' = (msgs \ delMsgs) \cup {
+                                        [   mid |-> seq.mseq,
+                                            src |-> msg.src,
+                                            dst |-> msg.dst,
+                                         target |-> msg.target,
+                                            fid |-> msg.fid,
+                                           type |-> "masterTransitDone",
+                                      isAdopter |-> FALSE,
+                                     adoptedFID |-> C!NotID,
+                                    backupPlace |-> C!NotPlace,
+                                        submit  |-> FALSE,
+                                        success |-> FALSE ] }
                          ELSE  /\ msgs' = (msgs \ delMsgs) 
                     ELSE IF msg.type = "backupCompletedDone"
                     THEN IF ~ (\E m \in msgs: \*message has been sent already 
                                     /\ m.type = msg.type /\ m.src = msg.src 
                                     /\ m.dst = msg.dst /\ m.fid = msg.fid 
                                     /\ m.isAdopter = msg.isAdopter /\ m.success )
-                         THEN /\ msgs' = (msgs \ delMsgs) \cup {[   mid |-> seq.mseq,
-                                                                    src |-> msg.src, 
-                                                                    dst |-> msg.dst,
-                                                                 target |-> msg.target,
-                                                                    fid |-> msg.fid,
-                                                                   type |-> "backupCompletedDone",
-                                                              isAdopter |-> msg.isAdopter,
-                                                                success |-> FALSE ] }
+                         THEN /\ msgs' = (msgs \ delMsgs) \cup {
+                                        [   mid |-> seq.mseq,
+                                            src |-> msg.src,
+                                            dst |-> msg.dst,
+                                         target |-> msg.target,
+                                            fid |-> msg.fid,
+                                           type |-> "backupCompletedDone",
+                                      isAdopter |-> msg.isAdopter,
+                                        success |-> FALSE ] }
                          ELSE /\ msgs' = (msgs \ delMsgs) 
                     ELSE IF msg.type = "backupLiveDone"    
                     THEN IF  ~ (\E m \in msgs: \*message has been sent already
                                      /\ m.type = msg.type /\ m.src = msg.src 
                                      /\ m.dst = msg.dst /\ m.fid = msg.fid 
                                      /\ m.source = msg.source /\ m.success )
-                         THEN /\ msgs' = (msgs \ delMsgs) \cup {[   mid |-> seq.mseq,
-                                                                    src |-> msg.src,
-                                                                    dst |-> msg.dst,
-                                                                 target |-> msg.target,
-                                                                 source |-> msg.source,
-                                                                    fid |-> msg.fid,
-                                                                    aid |-> msg.aid,
-                                                                   type |-> "backupLiveDone",
-                                                              isAdopter |-> msg.isAdopter,
-                                                             adoptedFID |-> msg.adoptedFID,
-                                                                success |-> FALSE ]}
+                         THEN /\ msgs' = (msgs \ delMsgs) \cup {
+                                        [   mid |-> seq.mseq,
+                                            src |-> msg.src,
+                                            dst |-> msg.dst,
+                                         target |-> msg.target,
+                                         source |-> msg.source,
+                                            fid |-> msg.fid,
+                                            aid |-> msg.aid,
+                                           type |-> "backupLiveDone",
+                                      isAdopter |-> msg.isAdopter,
+                                     adoptedFID |-> msg.adoptedFID,
+                                        success |-> FALSE ]}
                          ELSE /\ msgs' = (msgs \ delMsgs)
                     ELSE IF msg.type = "backupTransitDone"
                     THEN IF  ~ (\E m \in msgs: \*message has been sent already
                                      /\ m.type = msg.type /\ m.src = msg.src 
                                      /\ m.dst = msg.dst /\ m.fid = msg.fid 
                                      /\ m.target = msg.target /\ m.success )
-                         THEN /\ msgs' = (msgs \ delMsgs) \cup {[   mid |-> seq.mseq,
-                                                              src |-> msg.src, 
-                                                              dst |-> msg.dst,
-                                                           target |-> msg.target,
-                                                              fid |-> msg.fid,
-                                                             type |-> "backupTransitDone",
-                                                        isAdopter |-> msg.isAdopter,
-                                                       adoptedFID |-> msg.adoptedFID,
-                                                          success |-> FALSE ] }
+                         THEN /\ msgs' = (msgs \ delMsgs) \cup {
+                                        [   mid |-> seq.mseq,
+                                            src |-> msg.src, 
+                                            dst |-> msg.dst,
+                                         target |-> msg.target,
+                                            fid |-> msg.fid,
+                                           type |-> "backupTransitDone",
+                                      isAdopter |-> msg.isAdopter,
+                                     adoptedFID |-> msg.adoptedFID,
+                                        success |-> FALSE ] }
                          ELSE /\ msgs' = (msgs \ delMsgs)
                     ELSE FALSE
   /\ UNCHANGED << convertSet, adoptSet, mastersStatus, fstates, pstate, 
@@ -1791,35 +1802,35 @@ Next ==
 (* Asserting fairness properties to all actions                            *)
 (***************************************************************************)
 Liveness ==
-    /\ WF_Vars(RecvAsync) 
-    /\ WF_Vars(ReleaseRootFinish)
-    /\ WF_Vars(AuthorizeReceivedAsync) 
-    /\ WF_Vars(StartFinish) 
-    /\ WF_Vars(StopFinish)
-    /\ WF_Vars(SpawnLocalAsync)
-    /\ WF_Vars(SpawnRemoteAsync)
-    /\ WF_Vars(TerminateAsync) 
-    /\ WF_Vars(ScheduleNestedFinish) 
-    /\ WF_Vars(RunExprOrKill)
-    /\ WF_Vars(BackupTransit)
-    /\ WF_Vars(BackupLive)
-    /\ WF_Vars(BackupCompleted)
-    /\ WF_Vars(MasterTransit)
-    /\ WF_Vars(MasterLive)
-    /\ WF_Vars(MasterCompleted)
-    /\ WF_Vars(MasterTransitDone)  
-    /\ WF_Vars(MasterLiveDone) 
-    /\ WF_Vars(MasterCompletedDone) 
-    /\ WF_Vars(AdopterTransit)
-    /\ WF_Vars(AdopterLive)
-    /\ WF_Vars(AdopterCompleted)
-    /\ WF_Vars(SeekAdoption)
-    /\ WF_Vars(ConvertDeadActivities)
-    /\ WF_Vars(SimulateFailedResponse)
-    /\ WF_Vars(GetAdopterDone)
-    /\ WF_Vars(BackupGetAdopter)
-    /\ WF_Vars(AuthorizeTransitAsync) 
-    /\ WF_Vars(UnblockTerminateAsync)
+  /\ WF_Vars(RecvAsync) 
+  /\ WF_Vars(ReleaseRootFinish)
+  /\ WF_Vars(AuthorizeReceivedAsync) 
+  /\ WF_Vars(StartFinish) 
+  /\ WF_Vars(StopFinish)
+  /\ WF_Vars(SpawnLocalAsync)
+  /\ WF_Vars(SpawnRemoteAsync)
+  /\ WF_Vars(TerminateAsync) 
+  /\ WF_Vars(ScheduleNestedFinish) 
+  /\ WF_Vars(RunExprOrKill)
+  /\ WF_Vars(BackupTransit)
+  /\ WF_Vars(BackupLive)
+  /\ WF_Vars(BackupCompleted)
+  /\ WF_Vars(MasterTransit)
+  /\ WF_Vars(MasterLive)
+  /\ WF_Vars(MasterCompleted)
+  /\ WF_Vars(MasterTransitDone)  
+  /\ WF_Vars(MasterLiveDone) 
+  /\ WF_Vars(MasterCompletedDone) 
+  /\ WF_Vars(AdopterTransit)
+  /\ WF_Vars(AdopterLive)
+  /\ WF_Vars(AdopterCompleted)
+  /\ WF_Vars(SeekAdoption)
+  /\ WF_Vars(ConvertDeadActivities)
+  /\ WF_Vars(SimulateFailedResponse)
+  /\ WF_Vars(GetAdopterDone)
+  /\ WF_Vars(BackupGetAdopter)
+  /\ WF_Vars(AuthorizeTransitAsync) 
+  /\ WF_Vars(UnblockTerminateAsync)
           
 -------------------------------------------------------------------------------
 (***************************************************************************)
@@ -1830,6 +1841,6 @@ Spec ==  Init /\ [][Next]_Vars /\ Liveness
 THEOREM Spec => []( TypeOK /\ StateOK)
 =============================================================================
 \* Modification History
-\* Last modified Mon Dec 11 21:17:12 AEDT 2017 by u5482878
+\* Last modified Fri Dec 15 11:49:46 AEDT 2017 by u5482878
 \* Last modified Sun Dec 10 18:15:04 AEDT 2017 by shamouda
 \* Created Wed Sep 13 12:14:43 AEST 2017 by u5482878

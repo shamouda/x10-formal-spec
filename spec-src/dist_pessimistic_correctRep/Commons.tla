@@ -31,11 +31,11 @@ NotThreadID == -5050
 
 EMPTY_BLOCK == -1
 
-BlockID == 0..25\*NBLOCKS-1 
+BlockID == 0..4\*NBLOCKS-1 
 
 NotBlockID == -1000
 
-StmtID == 0..5\*MXSTMTS-1
+StmtID == 0..0\*MXSTMTS-1
 
 I_START == -1
 
@@ -48,8 +48,8 @@ I_PRE_FIN_ALLOC == -2
 Sequences == [ aseq: 1..MXACTIVITIES, mseq: 1..MXMESSAGES, fseq:IDRange]
 
 \* Each thread has a stack, and this is the stack entry
-StackEntry == [ b:BlockID,               \*BlockID == 0..NBLOCKS-1  
-                i:StmtID \cup {-1,-2},   \*StmtID == 0..MXSTMTS-1
+StackEntry == [ b:BlockID,
+                i:StmtID \cup {I_START, I_PRE_FIN_ALLOC},
                 fid:PIDRange ]
 
 \* the processing unit of program instructions
@@ -95,20 +95,6 @@ FinishState == [ id:IDRange \cup {NotID},
                  isGlobal:BOOLEAN, (* used by P0Finish*)
                  eroot:PIDRange \cup {NotID} \* root of the enclosing finish (used in PPoPP14 dist finish)
                ]
-                 
-ResilientFinishState == [
-    id:IDRange \cup {NotID},
-    parent:PIDRange \cup {NotID},
-    gfsRoot:PIDRange \cup {NotID},
-    gfsRootPlace:PLACE \cup {NotPlace},
-    numActive:Nat,
-    live:[ PLACE -> Nat ],
-    transit:[ PLACE -> [ PLACE -> Nat ] ],
-    liveAdopted:[ PLACE -> Nat ],
-    transitAdopted:[ PLACE -> [ PLACE -> Nat ] ],
-    adopterId:IDRange \cup {NotID},
-    isReleased:BOOLEAN
-]
 
 MasterFinish == [
     id:IDRange \cup {NotID},
@@ -147,18 +133,11 @@ RemoteAsyncMessages ==  [ mid:Nat,
                fid:IDRange ]  
 
 
-ReleaseFinishMessages == [ mid:0..100,
+ReleaseFinishMessages == [ mid:Nat,
                           src:PLACE, 
                           dst:PLACE, 
                           fid:IDRange,
                           type:{"releaseFinish"} ]
-
-AddChildMessages ==  [ mid |-> Nat,
-                       src |-> PLACE, 
-                       dst |-> PLACE,  
-                     eroot |-> IDRange,
-                     fid   |-> IDRange, 
-                      type |-> "addChild" ] 
 
 MasterTransitMessages == [ mid |-> Nat,
                            src |-> PLACE, 
@@ -183,23 +162,6 @@ MasterCompletedMessages == [ mid |-> Nat,
                              fid |-> IDRange, 
                        finishEnd |-> BOOLEAN,
                             type |-> { "masterCompleted", "adopterCompleted" } ]
-
-BackupAddChild ==  [   mid |-> Nat, 
-                       src |-> PLACE, 
-                       dst |-> PLACE,
-                     eroot |-> IDRange,
-                       fid |-> IDRange,
-                      type |-> "backupAddChild" ]
-
-AddChildDone == [   mid |-> Nat, 
-                    src |-> PLACE, 
-                    dst |-> PLACE,
-                  eroot |-> IDRange,
-                    fid |-> IDRange,
-                   type |-> {"addChildDone", "backupAddChildDone"},
-                success |-> BOOLEAN ]
-
-                           
 
 BackupGetAdopter == [   mid |-> Nat, 
                      src |-> PLACE, 
@@ -288,9 +250,6 @@ MasterLiveDone == [   mid |-> Nat,
                 isAdopter |-> BOOLEAN,
                 backupPlace |-> PLACE ]
                                           
-                                                           
-
-                                                      
 BackupCompleted ==  [ mid |-> Nat,
                       src |-> PLACE, 
                       dst |-> PLACE, 
@@ -319,33 +278,22 @@ BackupCompletedDone == [ mid |-> Nat,
                   isAdopter |-> BOOLEAN,
                     success |-> BOOLEAN ]
                                                                             
-DistFinishMessages == AddChildMessages
-                     \cup MasterTransitMessages
-                     \cup MasterLiveMessages
-                     \cup MasterCompletedMessages
-                     \cup BackupAddChild
-                     \cup AddChildDone
-                     \cup BackupGetAdopter
-                     \cup GetAdopterDone
-                     \cup BackupTransit
-                     \cup MasterTransitDone
-                     \cup BackupTransitDone
-                     \cup BackupLive
-                     \cup MasterLiveDone
-                     \cup BackupLiveDone
-                     \cup BackupCompleted
-                     \cup MasterCompletedDone
-                     \cup BackupCompletedDone
-                     \cup ReleaseFinishMessages
-                     
 Messages ==  RemoteAsyncMessages
-            \cup DistFinishMessages
-
-BackupMessages == BackupAddChild
-                  \cup BackupTransit                           
-                  \cup BackupLive                           
-                  \cup BackupCompleted
-                  \cup BackupGetAdopter
+            \cup MasterTransitMessages
+            \cup MasterLiveMessages
+            \cup MasterCompletedMessages
+            \cup BackupGetAdopter
+            \cup GetAdopterDone
+            \cup BackupTransit
+            \cup MasterTransitDone
+            \cup BackupTransitDone
+            \cup BackupLive
+            \cup MasterLiveDone
+            \cup BackupLiveDone
+            \cup BackupCompleted
+            \cup MasterCompletedDone
+            \cup BackupCompletedDone
+            \cup ReleaseFinishMessages
 
 SendMsg(m) == 
     msgs' = msgs \cup {m}
@@ -450,6 +398,6 @@ IncrAll ==
   
 =============================================================================
 \* Modification History
-\* Last modified Mon Dec 11 20:59:18 AEDT 2017 by u5482878
+\* Last modified Wed Dec 13 15:52:59 AEDT 2017 by u5482878
 \* Last modified Sun Dec 10 16:09:57 AEDT 2017 by shamouda
 \* Created Wed Sep 27 09:26:18 AEST 2017 by u5482878
