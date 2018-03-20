@@ -2,20 +2,17 @@
 (**************************************************************************)
 EXTENDS Integers
 
-CONSTANTS CLIENT_NUM,     (* the number of clients                        *)
-          MAX_KILL        (* maximum allowed kill events                  *)
+CONSTANTS CLIENT_NUM,     \* the number of clients                        
+          MAX_KILL        \* maximum allowed kill events                  
 
-VARIABLES state,          (* the program state, running or terminated     *)
-          clients,        (* clients sending value update requests to 
-                             master and backup                            *)
-          master,         (* pool of master instances, only one is active *)
-          backup,         (* pool of backup instances, only one is active *)
-          msgs,           (* in-flight messages                           *)
-          killed,         (* number of invoked kill actions to master or 
-                             backup                                       *)
-          tmp
+VARIABLES state,          \* the program state, running or terminated     
+          clients,        \* clients sending value update requests to master and backup                            
+          master,         \* pool of master instances, only one is active 
+          backup,         \* pool of backup instances, only one is active 
+          msgs,           \* in-flight messages                           
+          killed          \* number of invoked kill actions to master or backup                                       
 
-Vars == << tmp, state, clients, master, backup, msgs, killed >>
+Vars == << state, clients, master, backup, msgs, killed >>
 ----------------------------------------------------------------------------
 C == INSTANCE Commons
 ----------------------------------------------------------------------------
@@ -85,7 +82,6 @@ Init ==
                       value |-> 0, version |-> 0 ] ]
   /\ msgs = {}
   /\ killed = 0
-  /\ tmp = {}
   
 ----------------------------------------------------------------------------
 AtLeastOneClientStarted ==
@@ -108,7 +104,7 @@ KillMaster ==
      IN /\ activeM # C!NOT_MASTER
         /\ master' = [ master EXCEPT ![activeM.id].status = C!INST_STATUS_LOST ]
         /\ killed' = killed + 1
-  /\ UNCHANGED <<tmp,   state, clients, backup, msgs >>
+  /\ UNCHANGED << state, clients, backup, msgs >>
 
 KillBackup ==
   (*************************************************************************)
@@ -121,7 +117,7 @@ KillBackup ==
      IN /\ activeB # C!NOT_BACKUP
         /\ backup' = [ backup EXCEPT ![activeB.id].status = C!INST_STATUS_LOST ]
         /\ killed' = killed + 1
-  /\ UNCHANGED <<tmp,   state, clients, master, msgs >>
+  /\ UNCHANGED << state, clients, master, msgs >>
 
 C_Start ==
   (*************************************************************************)
@@ -138,7 +134,7 @@ C_Start ==
                        value |-> client.value,
                        tag |-> "masterDo" ] )
          /\ clients' = [ clients EXCEPT ![client.id].phase = C!PH2_WORKING ] 
-  /\ UNCHANGED <<tmp,   state, master, backup, killed >>
+  /\ UNCHANGED << state, master, backup, killed >>
 
 M_HandleDo ==
   (*************************************************************************)
@@ -156,7 +152,7 @@ M_HandleDo ==
                               backupId |-> master[msg.masterId].backupId ,
                               value |-> 0,
                               tag |-> "masterDone" ] )
-  /\ UNCHANGED <<tmp,   state, clients, backup, killed >>
+  /\ UNCHANGED << state, clients, backup, killed >>
 
 C_HandleMasterDone ==
   (*************************************************************************)
@@ -174,7 +170,7 @@ C_HandleMasterDone ==
                               tag |-> "backupDo" ] )
         \* update our knowledge about the backup identity
         /\ clients' = [ clients EXCEPT ![msg.clientId].backupId = msg.backupId ]
-  /\ UNCHANGED <<tmp,   state, master, backup, killed >>
+  /\ UNCHANGED << state, master, backup, killed >>
 
 B_HandleDo == 
   (*************************************************************************)
@@ -203,7 +199,7 @@ B_HandleDo ==
                                       backupId |-> msg.backupId,
                                       value |-> 0,
                                       tag |-> "newMasterId" ] )
-  /\ UNCHANGED <<tmp,   state, clients, master, killed >>
+  /\ UNCHANGED << state, clients, master, killed >>
  
 C_HandleBackupDone ==
   (*************************************************************************)
@@ -214,7 +210,7 @@ C_HandleBackupDone ==
      IN /\ msg # C!NOT_MESSAGE
         /\ C!RecvMsg( msg )
         /\ clients' = [ clients EXCEPT ![msg.clientId].phase = C!PH2_COMPLETED ]
-  /\ UNCHANGED <<tmp,   state, master, backup, killed >>
+  /\ UNCHANGED << state, master, backup, killed >>
 
 --------------------------------------------------------------------------------
 Sys_NotifyMasterFailure ==
@@ -238,7 +234,7 @@ Sys_NotifyMasterFailure ==
                      backupId |-> C!UNKNOWN_ID,
                      value |-> 0,
                      tag |-> notifyTag ] )
-  /\ UNCHANGED <<tmp,   state, clients, master, backup, killed >>
+  /\ UNCHANGED << state, clients, master, backup, killed >>
 
 Sys_NotifyBackupFailure == 
   (*************************************************************************)
@@ -261,7 +257,7 @@ Sys_NotifyBackupFailure ==
                      backupId |-> C!UNKNOWN_ID,
                      value |-> 0,
                      tag |-> notifyTag ] )
-  /\ UNCHANGED <<tmp,   state, clients, master, backup, killed >>
+  /\ UNCHANGED << state, clients, master, backup, killed >>
 
 --------------------------------------------------------------------------------
 C_HandleMasterDoFailed ==
@@ -290,7 +286,7 @@ C_HandleMasterDoFailed ==
                                       tag |-> "backupGetNewMaster" ])
                 /\ state' = state
                 /\ clients' = clients
-  /\ UNCHANGED <<tmp,   master, backup, killed >>
+  /\ UNCHANGED << master, backup, killed >>
 
 C_HandleBackupDoFailed ==
   (*************************************************************************)
@@ -309,7 +305,7 @@ C_HandleBackupDoFailed ==
                                 backupId |-> clients[msg.clientId].backupId,
                                 value |-> 0,
                                 tag |-> "masterGetNewBackup" ])
-  /\ UNCHANGED <<tmp,   state, clients, master, backup, killed >>
+  /\ UNCHANGED << state, clients, master, backup, killed >>
 
 ----------------------------------------------------------------------------------
 M_HandleGetNewBackup == 
@@ -328,7 +324,7 @@ M_HandleGetNewBackup ==
                                 backupId |-> master[msg.masterId].backupId,
                                 value |-> 0,
                                 tag |-> "newBackupId" ])
-  /\ UNCHANGED <<tmp,   state, clients, master, backup, killed >>
+  /\ UNCHANGED << state, clients, master, backup, killed >>
   
 B_HandleGetNewMaster == 
   (*************************************************************************)
@@ -346,7 +342,7 @@ B_HandleGetNewMaster ==
                                 backupId |-> msg.backupId,
                                 value |-> 0,
                                 tag |-> "newMasterId" ])
-  /\ UNCHANGED <<tmp,   state, clients, master, backup, killed >>
+  /\ UNCHANGED << state, clients, master, backup, killed >>
 
 -----------------------------------------------------------------------------------
 C_HandleBackupGetNewMasterFailed ==
@@ -375,7 +371,7 @@ C_HandleBackupGetNewMasterFailed ==
                    \* change status to pending to be eligible for restart 
                 /\ clients' = [ clients EXCEPT ![msg.clientId].masterId = foundMaster.id,
                                                ![msg.clientId].phase = C!PH1_PENDING]
-  /\ UNCHANGED <<tmp,   master, backup, killed >>
+  /\ UNCHANGED << master, backup, killed >>
 
 C_HandleMasterGetNewBackupFailed ==
   (*************************************************************************)
@@ -390,7 +386,7 @@ C_HandleMasterGetNewBackupFailed ==
         /\ state' = "fatal"
         /\ clients' = [ clients EXCEPT ![msg.clientId].phase = C!PH2_COMPLETED_FATAL ]
         /\ C!RecvMsg(msg)
-  /\ UNCHANGED <<tmp,   master, backup, killed >>
+  /\ UNCHANGED << master, backup, killed >>
   
 -----------------------------------------------------------------------------------  
 C_UpdateBackupId ==
@@ -401,7 +397,7 @@ C_UpdateBackupId ==
         /\ C!RecvMsg( msg )
         /\ clients' = [ clients EXCEPT ![msg.clientId].backupId = msg.backupId ,
                                        ![msg.clientId].phase = C!PH2_COMPLETED ]
-  /\ UNCHANGED <<tmp,   state, master, backup, killed >>
+  /\ UNCHANGED << state, master, backup, killed >>
   
 
 C_UpdateMasterIdAndRestart ==
@@ -415,7 +411,7 @@ C_UpdateMasterIdAndRestart ==
          /\ C!RecvMsg( msg )
          /\ clients' = [ clients EXCEPT ![msg.clientId].masterId = msg.masterId,
                                         ![msg.clientId].phase = C!PH1_PENDING ] 
-  /\ UNCHANGED <<tmp,   state, master, backup, killed >>
+  /\ UNCHANGED << state, master, backup, killed >>
 -------------------------------------------------------------------------------
 M_DetectBackupLost ==
   (*************************************************************************)
@@ -427,7 +423,7 @@ M_DetectBackupLost ==
      IN /\ activeM # C!NOT_MASTER \* master is active
         /\ liveB = C!NOT_BACKUP \* backup is lost
         /\ master' = [ master EXCEPT ![activeM.id].status = C!INST_STATUS_BUSY ] 
-  /\ UNCHANGED <<tmp,   state, clients, backup, msgs, killed >>
+  /\ UNCHANGED << state, clients, backup, msgs, killed >>
 
 M_RecoverBackup ==
   (*************************************************************************)
@@ -447,7 +443,7 @@ M_RecoverBackup ==
                                              ![newBackupId].version = busyM.version ]
               /\ master' = [ master EXCEPT ![busyM.id].status = C!INST_STATUS_ACTIVE,
                                              ![busyM.id].backupId = newBackupId  ] 
-  /\ UNCHANGED <<tmp,   state, clients, msgs, killed >>
+  /\ UNCHANGED << state, clients, msgs, killed >>
   
 B_DetectMasterLost ==
   (*************************************************************************)
@@ -459,7 +455,7 @@ B_DetectMasterLost ==
      IN /\ liveM = C!NOT_MASTER \* master is not active
         /\ activeB # C!NOT_BACKUP \* backup is active
         /\ backup' = [ backup EXCEPT ![activeB.id].status = C!INST_STATUS_BUSY ] 
-  /\ UNCHANGED <<tmp,   state, clients, master, msgs, killed >>
+  /\ UNCHANGED << state, clients, master, msgs, killed >>
 
 B_RecoverMaster ==
   (*************************************************************************)
@@ -479,7 +475,7 @@ B_RecoverMaster ==
                                              ![newMasterId].version = busyB.version ]
               /\ backup' = [ backup EXCEPT ![busyB.id].status = C!INST_STATUS_ACTIVE,
                                              ![busyB.id].masterId = newMasterId  ] 
-  /\ UNCHANGED <<tmp,   state, clients, msgs, killed >>
+  /\ UNCHANGED << state, clients, msgs, killed >>
 ----------------------------------------------------------------------------------
 TerminateSuccessfully ==
   (*************************************************************************)
@@ -489,7 +485,7 @@ TerminateSuccessfully ==
      (* wait for all clients to complete updating the master and backup *)
   /\ \A c \in C!CLIENT_ID: clients[c].phase = C!PH2_COMPLETED
   /\ state' = "terminated"
-  /\ UNCHANGED <<tmp,   clients, master, backup, msgs, killed >>
+  /\ UNCHANGED << clients, master, backup, msgs, killed >>
 
 Next ==
   \/ KillMaster
@@ -548,6 +544,6 @@ Spec ==  Init /\ [][Next]_Vars /\ Liveness
 THEOREM Spec => []( TypeOK /\ StateOK)
 =============================================================================
 \* Modification History
-\* Last modified Mon Mar 19 20:30:28 AEDT 2018 by u5482878
+\* Last modified Tue Mar 20 15:30:27 AEDT 2018 by u5482878
 \* Last modified Sat Mar 17 16:42:36 AEDT 2018 by shamouda
 \* Created Mon Mar 05 13:44:57 AEDT 2018 by u5482878

@@ -1,16 +1,14 @@
 ---------------------------- MODULE Commons --------------------------------
 EXTENDS Integers
-CONSTANTS CLIENT_NUM,     (* the number of clients                        *)
-          MAX_KILL        (* maximum allowed kill events                  *)
+CONSTANTS CLIENT_NUM,     \* the number of clients                        
+          MAX_KILL        \* maximum allowed kill events                  
 
-VARIABLES state,          (* the program state, running or terminated     *)
-          clients,        (* clients sending value update requests to 
-                             master and backup                            *)
-          master,         (* pool of master instances, only one is active *)
-          backup,         (* pool of backup instances, only one is active *)
-          msgs,           (* in-flight messages                           *)
-          killed          (* number of invoked kill actions to master or 
-                             backup                                       *)
+VARIABLES state,          \* the program state, running or terminated     
+          clients,        \* clients sending value update requests to master and backup                            
+          master,         \* pool of master instances, only one is active 
+          backup,         \* pool of backup instances, only one is active 
+          msgs,           \* in-flight messages                           
+          killed          \* number of invoked kill actions to master or backup         
 ----------------------------------------------------------------------------
 (* Identifiers related to master and backup instance ids *)
 FIRST_ID == 1
@@ -215,6 +213,6 @@ FindMessageToClient(from, tag) ==
 
 =============================================================================
 \* Modification History
-\* Last modified Mon Mar 19 19:10:52 AEDT 2018 by u5482878
+\* Last modified Tue Mar 20 15:30:59 AEDT 2018 by u5482878
 \* Last modified Sat Mar 17 16:13:02 AEDT 2018 by shamouda
 \* Created Mon Mar 05 13:44:57 AEDT 2018 by u5482878
