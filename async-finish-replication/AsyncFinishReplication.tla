@@ -5,7 +5,7 @@ EXTENDS Integers
 CONSTANTS CLIENT_NUM,     \* the number of clients                        
           MAX_KILL        \* maximum allowed kill events                  
 
-VARIABLES exec_state,     \* the execution state of the program: running, terminated, or fatal   
+VARIABLES exec_state,     \* the execution state of the program: running, success, or fatal   
           clients,        \* clients sending value update requests to master and backup                            
           master,         \* pool of master instances, only one is active 
           backup,         \* pool of backup instances, only one is active 
@@ -23,7 +23,7 @@ TypeOK ==
   /\ clients \in [ C!CLIENT_ID -> C!Client ]
   /\ master \in [ C!INSTANCE_ID -> C!Master ]
   /\ backup \in [ C!INSTANCE_ID -> C!Backup ]
-  /\ exec_state \in { "running", "terminated", "fatal" }
+  /\ exec_state \in { "running", "success", "fatal" }
   /\ msgs \subseteq C!Messages
   /\ killed \in 0..MAX_KILL
 
@@ -38,7 +38,7 @@ StateOK ==
   LET curMaster == C!LastKnownMaster
       curBackup == C!LastKnownBackup
   IN /\ curMaster.version >= curBackup.version
-     /\ IF exec_state = "terminated"
+     /\ IF exec_state = "success"
         THEN /\ curMaster.version = CLIENT_NUM 
              /\ curBackup.version = CLIENT_NUM
         ELSE /\ curMaster.version <= CLIENT_NUM 
@@ -58,7 +58,7 @@ MustTerminate ==
   (* The program must terminate by having all clients complete their       *)
   (* update actions on both master and backup                              *)
   (*************************************************************************)
-   <> ( exec_state \in { "terminated", "fatal" } )
+   <> ( exec_state \in { "success", "fatal" } )
 
 ----------------------------------------------------------------------------
 Init ==
@@ -93,7 +93,7 @@ AtLeastOneClientStarted ==
   \/ /\ killed = 0 
      /\ \E c \in C!CLIENT_ID : clients[c].phase # C!PH1_PENDING
 
-E_KillMaster ==
+E_KillingMaster ==
   (*************************************************************************)
   (* Kill the active master instance.                                      *)
   (*************************************************************************)
@@ -106,7 +106,7 @@ E_KillMaster ==
         /\ killed' = killed + 1
   /\ UNCHANGED << exec_state, clients, backup, msgs >>
 
-E_KillBackup ==
+E_KillingBackup ==
   (*************************************************************************)
   (* Kill the active backup instance.                                      *)
   (*************************************************************************)
@@ -119,7 +119,7 @@ E_KillBackup ==
         /\ killed' = killed + 1
   /\ UNCHANGED << exec_state, clients, master, msgs >>
 
-C_Start ==
+C_Starting ==
   (*************************************************************************)
   (* Client start the replication process by sending "do" to master        *)
   (*************************************************************************)
@@ -136,7 +136,7 @@ C_Start ==
          /\ clients' = [ clients EXCEPT ![client.id].phase = C!PH2_WORKING ] 
   /\ UNCHANGED << exec_state, master, backup, killed >>
 
-M_HandleDo ==
+M_Doing ==
   (*************************************************************************)
   (* Master receiving "do", updating value, and sending "done"             *)
   (*************************************************************************)
@@ -154,7 +154,7 @@ M_HandleDo ==
                               tag |-> "masterDone" ] )
   /\ UNCHANGED << exec_state, clients, backup, killed >>
 
-C_HandleMasterDone ==
+C_HandlingMasterDone ==
   (*************************************************************************)
   (* Client receiving "done" from master, and forwarding action to backup  *)
   (*************************************************************************) 
@@ -172,7 +172,7 @@ C_HandleMasterDone ==
         /\ clients' = [ clients EXCEPT ![msg.clientId].backupId = msg.backupId ]
   /\ UNCHANGED << exec_state, master, backup, killed >>
 
-B_HandleDo == 
+B_Doing == 
   (*************************************************************************)
   (* Backup receiving "do", updating value, then sending "done"            *)
   (*************************************************************************)
@@ -201,7 +201,7 @@ B_HandleDo ==
                                       tag |-> "newMasterId" ] )
   /\ UNCHANGED << exec_state, clients, master, killed >>
  
-C_HandleBackupDone ==
+C_HandlingBackupDone ==
   (*************************************************************************)
   (* Client receiving "done" from backup. Replication completed            *)
   (*************************************************************************) 
@@ -212,67 +212,20 @@ C_HandleBackupDone ==
         /\ clients' = [ clients EXCEPT ![msg.clientId].phase = C!PH2_COMPLETED ]
                       \* if all clients completed, then terminate the execution successfully
         /\ IF \A c \in C!CLIENT_ID: clients'[c].phase = C!PH2_COMPLETED
-           THEN exec_state' = "terminated"
+           THEN exec_state' = "success"
            ELSE exec_state' = exec_state
   /\ UNCHANGED << master, backup, killed >>
 
 --------------------------------------------------------------------------------
-N_NotifyMasterFailure ==
-  (*************************************************************************)
-  (* System notifying client of a dead master                              *)
-  (*************************************************************************) 
-  /\ exec_state = "running"
-  /\ LET msg == C!FindMessageTo("m", C!INST_STATUS_LOST)
-     IN /\ msg # C!NOT_MESSAGE
-        /\ LET notifyTag == IF msg.tag = "masterDo" 
-                            THEN "masterDoFailed"
-                            ELSE IF msg.tag = "masterGetNewBackup" 
-                            THEN "masterGetNewBackupFailed"
-                            ELSE "INVALID" \* this should be unreachable
-           IN /\ notifyTag # "INVALID" 
-              /\ C!ReplaceMsg( msg,
-                   [ from |-> "sys",
-                     to |-> "c",
-                     clientId |-> msg.clientId,
-                     masterId |-> C!UNKNOWN_ID,
-                     backupId |-> C!UNKNOWN_ID,
-                     value |-> 0,
-                     tag |-> notifyTag ] )
-  /\ UNCHANGED << exec_state, clients, master, backup, killed >>
-
-N_NotifyBackupFailure == 
-  (*************************************************************************)
-  (* System notifying client of a dead backup                              *)
-  (*************************************************************************) 
-  /\ exec_state = "running"
-  /\ LET msg == C!FindMessageTo("b", C!INST_STATUS_LOST)
-     IN /\ msg # C!NOT_MESSAGE
-        /\ LET notifyTag == IF msg.tag = "backupDo" 
-                            THEN "backupDoFailed"
-                            ELSE IF msg.tag = "backupGetNewMaster"
-                            THEN "backupGetNewMasterFailed"
-                            ELSE "INVALID" \* this should be unreachable
-           IN /\ notifyTag # "INVALID" 
-              /\ C!ReplaceMsg( msg,
-                   [ from |-> "sys",
-                     to |-> "c",
-                     clientId |-> msg.clientId,
-                     masterId |-> C!UNKNOWN_ID,
-                     backupId |-> C!UNKNOWN_ID,
-                     value |-> 0,
-                     tag |-> notifyTag ] )
-  /\ UNCHANGED << exec_state, clients, master, backup, killed >>
-
---------------------------------------------------------------------------------
-C_HandleMasterDoFailed ==
+C_HandlingMasterDoFailed ==
   (*************************************************************************)
   (* Client received the system's notification of a dead master, and       *)
   (* is requesting the backup to return the new master info                *)
   (*************************************************************************) 
   /\ exec_state = "running"
-  /\ LET msg == C!FindMessageToClient("sys", "masterDoFailed")
+  /\ LET msg == C!FindMessageToWithTag("m", C!INST_STATUS_LOST, "masterDo") 
          knownBackup == IF msg # C!NOT_MESSAGE 
-                        THEN C!SearchForBackup
+                        THEN C!FindBackup(C!INST_STATUS_ACTIVE)
                         ELSE C!NOT_BACKUP
      IN /\ msg # C!NOT_MESSAGE
         /\ IF knownBackup = C!NOT_BACKUP
@@ -292,13 +245,13 @@ C_HandleMasterDoFailed ==
                 /\ clients' = clients
   /\ UNCHANGED << master, backup, killed >>
 
-C_HandleBackupDoFailed ==
+C_HandlingBackupDoFailed ==
   (*************************************************************************)
   (* Client received the system's notification of a dead backup, and       *)
   (* is requesting the master to return the new backup info                *)
   (*************************************************************************) 
   /\ exec_state = "running"
-  /\ LET msg == C!FindMessageToClient("sys", "backupDoFailed")
+  /\ LET msg == C!FindMessageToWithTag("b", C!INST_STATUS_LOST, "backupDo") 
      IN /\ msg # C!NOT_MESSAGE
         /\ C!ReplaceMsg( msg, [ from |-> "c",
                                 to |-> "m",
@@ -312,7 +265,7 @@ C_HandleBackupDoFailed ==
   /\ UNCHANGED << exec_state, clients, master, backup, killed >>
 
 ----------------------------------------------------------------------------------
-M_HandleGetNewBackup == 
+M_GettingNewBackup == 
   (*************************************************************************)
   (* Master responding to client with updated backup identity              *)
   (*************************************************************************)
@@ -330,7 +283,7 @@ M_HandleGetNewBackup ==
                                 tag |-> "newBackupId" ])
   /\ UNCHANGED << exec_state, clients, master, backup, killed >>
   
-B_HandleGetNewMaster == 
+B_GettingNewMaster == 
   (*************************************************************************)
   (* Backup responding to client with updated master identity              *)
   (*************************************************************************)
@@ -349,7 +302,7 @@ B_HandleGetNewMaster ==
   /\ UNCHANGED << exec_state, clients, master, backup, killed >>
 
 -----------------------------------------------------------------------------------
-C_HandleBackupGetNewMasterFailed ==
+C_HandlingBackupGetNewMasterFailed ==
   (*************************************************************************)
   (* The client handling the failure of the backup, when the client asked  *)
   (* the backup to return the new master identity. The client mannually    *)
@@ -360,24 +313,22 @@ C_HandleBackupGetNewMasterFailed ==
   (* fails                                                                 *)
   (*************************************************************************) 
   /\ exec_state = "running"
-  /\ LET msg == C!FindMessageToClient("sys", "backupGetNewMasterFailed")
-         searchManually == msg # C!NOT_MESSAGE
-         foundMaster == C!SearchForMaster
+  /\ LET msg == C!FindMessageToWithTag("b", C!INST_STATUS_LOST, "backupGetNewMaster")
+         foundMaster == C!FindMaster(C!INST_STATUS_ACTIVE)
      IN /\ msg # C!NOT_MESSAGE
-        /\ searchManually
         /\ C!RecvMsg(msg)
         /\ IF foundMaster = C!NOT_MASTER \* no live master found
            THEN /\ exec_state' = "fatal"
-                /\ clients' = [ clients EXCEPT ![msg.clientId].phase = C!PH2_COMPLETED_FATAL]
+                /\ clients' = [ clients EXCEPT ![msg.clientId].phase = C!PH2_COMPLETED_FATAL ]
            ELSE /\ exec_state' = exec_state
                    \* at this point, the live master must have been changed
                 /\ foundMaster.id # clients[msg.clientId].masterId
                    \* change status to pending to be eligible for restart 
                 /\ clients' = [ clients EXCEPT ![msg.clientId].masterId = foundMaster.id,
-                                               ![msg.clientId].phase = C!PH1_PENDING]
+                                               ![msg.clientId].phase = C!PH1_PENDING ]
   /\ UNCHANGED << master, backup, killed >>
 
-C_HandleMasterGetNewBackupFailed ==
+C_HandlingMasterGetNewBackupFailed ==
   (*************************************************************************)
   (* The client handling the failure of the master when the client asked   *)
   (* the master to return the new backup identity. The failure of the      *)
@@ -385,7 +336,7 @@ C_HandleMasterGetNewBackupFailed ==
   (* it, because it may have the old version before masterDone.            *)
   (*************************************************************************) 
   /\ exec_state = "running"
-  /\ LET msg == C!FindMessageToClient("sys", "masterGetNewBackupFailed")
+  /\ LET msg == C!FindMessageToWithTag("m", C!INST_STATUS_LOST, "masterGetNewBackup") 
      IN /\ msg # C!NOT_MESSAGE
         /\ exec_state' = "fatal"
         /\ clients' = [ clients EXCEPT ![msg.clientId].phase = C!PH2_COMPLETED_FATAL ]
@@ -393,7 +344,7 @@ C_HandleMasterGetNewBackupFailed ==
   /\ UNCHANGED << master, backup, killed >>
   
 -----------------------------------------------------------------------------------  
-C_UpdateBackupId ==
+C_UpdatingBackupId ==
   /\ exec_state = "running"
   /\ LET msg == C!FindMessageToClient("m", "newBackupId")
      IN /\ msg # C!NOT_MESSAGE \* receive new backup identity, and complete request, 
@@ -403,12 +354,12 @@ C_UpdateBackupId ==
                                        ![msg.clientId].phase = C!PH2_COMPLETED ]
            \* if all clients completed, then terminate the execution successfully
         /\ IF \A c \in C!CLIENT_ID: clients'[c].phase = C!PH2_COMPLETED
-           THEN exec_state' = "terminated"
+           THEN exec_state' = "success"
            ELSE exec_state' = exec_state
   /\ UNCHANGED << master, backup, killed >>
   
 
-C_UpdateMasterIdAndBePending ==
+C_UpdatingMasterIdAndBePending ==
   (*************************************************************************)
   (* Client receiving a new master identify from a live backup and is      *)
   (* preparing to restart by changing its phase to pending                 *)
@@ -421,115 +372,85 @@ C_UpdateMasterIdAndBePending ==
                                         ![msg.clientId].phase = C!PH1_PENDING ] 
   /\ UNCHANGED << exec_state, master, backup, killed >>
 -------------------------------------------------------------------------------
-M_DetectBackupLostBeBusy ==
-  (*************************************************************************)
-  (* Master detected backup failure and is getting ready to recovery it    *)
-  (*************************************************************************)
-  /\ exec_state = "running"
-  /\ LET activeM == C!FindMaster(C!INST_STATUS_ACTIVE)
-         liveB == C!LiveBackup
-     IN /\ activeM # C!NOT_MASTER \* master is active
-        /\ liveB = C!NOT_BACKUP \* backup is lost
-        /\ master' = [ master EXCEPT ![activeM.id].status = C!INST_STATUS_BUSY ] 
-  /\ UNCHANGED << exec_state, clients, backup, msgs, killed >>
-
-M_RecoverBackup ==
+M_CreatingNewBackup ==
   (*************************************************************************)
   (* Master creating a new backup using its own exec_state. Master does not     *)
   (* process any client requests during recovery                           *)
   (*************************************************************************)
   /\ exec_state = "running"
-  /\ LET busyM == C!FindMaster(C!INST_STATUS_BUSY)
+  /\ LET activeM == C!FindMaster(C!INST_STATUS_ACTIVE)
+         activeB == C!FindBackup(C!INST_STATUS_ACTIVE)
          lostB == C!LastLostBackup
-     IN /\ lostB # C!NOT_BACKUP \* a lost backup exists
-        /\ busyM # C!NOT_MASTER \* master is busy recovering master
-        /\ LET newBackupId == lostB.id + 1
+     IN /\ activeM # C!NOT_MASTER \* active master exists
+        /\ activeB = C!NOT_BACKUP \* active backup does not exist
+        /\ lostB # C!NOT_BACKUP \* a lost backup exists
+        /\ LET newBackupId == lostB.id + 1 \* new backup id is the following id of the dead backup
            IN /\ newBackupId <= C!MAX_INSTANCE_ID
               /\ backup' = [ backup EXCEPT ![newBackupId].status = C!INST_STATUS_ACTIVE,
-                                             ![newBackupId].masterId = busyM.id,
-                                             ![newBackupId].value = busyM.value,
-                                             ![newBackupId].version = busyM.version ]
-              /\ master' = [ master EXCEPT ![busyM.id].status = C!INST_STATUS_ACTIVE,
-                                             ![busyM.id].backupId = newBackupId  ] 
+                                           ![newBackupId].masterId = activeM.id,
+                                           ![newBackupId].value = activeM.value,
+                                           ![newBackupId].version = activeM.version ]
+              /\ master' = [ master EXCEPT ![activeM.id].backupId = newBackupId  ] 
   /\ UNCHANGED << exec_state, clients, msgs, killed >>
   
-B_DetectMasterLostBeBusy ==
-  (*************************************************************************)
-  (* Backup detected master failure and is getting ready to recover it     *)
-  (*************************************************************************)
-  /\ exec_state = "running"
-  /\ LET liveM == C!SearchForMaster
-         activeB == C!FindBackup(C!INST_STATUS_ACTIVE)
-     IN /\ liveM = C!NOT_MASTER \* master is not active
-        /\ activeB # C!NOT_BACKUP \* backup is active
-        /\ backup' = [ backup EXCEPT ![activeB.id].status = C!INST_STATUS_BUSY ] 
-  /\ UNCHANGED << exec_state, clients, master, msgs, killed >>
-
-B_RecoverMaster ==
+B_CreatingNewMaster ==
   (*************************************************************************)
   (* Backup creating a new master using its own exec_state. Backup does not     *)
   (* process any client requests during recovery                           *)
   (*************************************************************************)
   /\ exec_state = "running"
-  /\ LET lostM == C!LastLostMaster
-         busyB == C!FindBackup(C!INST_STATUS_BUSY)
-     IN /\ lostM # C!NOT_MASTER \* a lost master exists
-        /\ busyB # C!NOT_BACKUP \* backup is busy recovering master
+  /\ LET activeM == C!FindMaster(C!INST_STATUS_ACTIVE)
+         activeB == C!FindBackup(C!INST_STATUS_ACTIVE)
+         lostM == C!LastLostMaster
+     IN /\ activeM = C!NOT_MASTER \* active master does not exist
+        /\ activeB # C!NOT_BACKUP \* active backup exists
+        /\ lostM # C!NOT_MASTER \* a lost master exists
         /\ LET newMasterId == lostM.id + 1
            IN /\ newMasterId <= C!MAX_INSTANCE_ID
               /\ master' = [ master EXCEPT ![newMasterId].status = C!INST_STATUS_ACTIVE,
-                                             ![newMasterId].backupId = busyB.id,
-                                             ![newMasterId].value = busyB.value,
-                                             ![newMasterId].version = busyB.version ]
-              /\ backup' = [ backup EXCEPT ![busyB.id].status = C!INST_STATUS_ACTIVE,
-                                             ![busyB.id].masterId = newMasterId  ] 
+                                             ![newMasterId].backupId = activeB.id,
+                                             ![newMasterId].value = activeB.value,
+                                             ![newMasterId].version = activeB.version ]
+              /\ backup' = [ backup EXCEPT ![activeB.id].masterId = newMasterId  ] 
   /\ UNCHANGED << exec_state, clients, msgs, killed >>
 
 Next ==
-  \/ E_KillMaster
-  \/ E_KillBackup
-  \/ C_Start
-  \/ M_HandleDo
-  \/ C_HandleMasterDone
-  \/ B_HandleDo
-  \/ C_HandleBackupDone
-  \/ N_NotifyMasterFailure
-  \/ N_NotifyBackupFailure
-  \/ C_HandleMasterDoFailed
-  \/ C_HandleBackupDoFailed
-  \/ M_HandleGetNewBackup
-  \/ B_HandleGetNewMaster
-  \/ C_HandleBackupGetNewMasterFailed
-  \/ C_HandleMasterGetNewBackupFailed
-  \/ C_UpdateBackupId
-  \/ C_UpdateMasterIdAndBePending
-  \/ M_DetectBackupLostBeBusy
-  \/ M_RecoverBackup
-  \/ B_DetectMasterLostBeBusy
-  \/ B_RecoverMaster
+  \/ E_KillingMaster
+  \/ E_KillingBackup
+  \/ C_Starting
+  \/ M_Doing
+  \/ C_HandlingMasterDone
+  \/ B_Doing
+  \/ C_HandlingBackupDone
+  \/ C_HandlingMasterDoFailed
+  \/ C_HandlingBackupDoFailed
+  \/ M_GettingNewBackup
+  \/ B_GettingNewMaster
+  \/ C_HandlingBackupGetNewMasterFailed
+  \/ C_HandlingMasterGetNewBackupFailed
+  \/ C_UpdatingBackupId
+  \/ C_UpdatingMasterIdAndBePending
+  \/ M_CreatingNewBackup
+  \/ B_CreatingNewMaster
   
 Liveness ==
-  /\ WF_Vars( E_KillMaster )
-  /\ WF_Vars( E_KillBackup )
-  /\ WF_Vars( C_Start )
-  /\ WF_Vars( M_HandleDo )
-  /\ WF_Vars( C_HandleMasterDone )
-  /\ WF_Vars( B_HandleDo )
-  /\ WF_Vars( C_HandleBackupDone )
-  /\ WF_Vars( N_NotifyMasterFailure )
-  /\ WF_Vars( N_NotifyBackupFailure )
-  /\ WF_Vars( C_HandleMasterDoFailed )
-  /\ WF_Vars( C_HandleBackupDoFailed )
-  /\ WF_Vars( M_HandleGetNewBackup )
-  /\ WF_Vars( B_HandleGetNewMaster )
-  /\ WF_Vars( C_HandleBackupGetNewMasterFailed )
-  /\ WF_Vars( C_HandleMasterGetNewBackupFailed )
-  /\ WF_Vars( C_UpdateBackupId )
-  /\ WF_Vars( C_UpdateMasterIdAndBePending )
-  /\ WF_Vars( M_DetectBackupLostBeBusy )
-  /\ WF_Vars( M_RecoverBackup )
-  /\ WF_Vars( B_DetectMasterLostBeBusy )
-  /\ WF_Vars( B_RecoverMaster )
+  /\ WF_Vars( E_KillingMaster )
+  /\ WF_Vars( E_KillingBackup )
+  /\ WF_Vars( C_Starting )
+  /\ WF_Vars( M_Doing )
+  /\ WF_Vars( C_HandlingMasterDone )
+  /\ WF_Vars( B_Doing )
+  /\ WF_Vars( C_HandlingBackupDone )
+  /\ WF_Vars( C_HandlingMasterDoFailed )
+  /\ WF_Vars( C_HandlingBackupDoFailed )
+  /\ WF_Vars( M_GettingNewBackup )
+  /\ WF_Vars( B_GettingNewMaster )
+  /\ WF_Vars( C_HandlingBackupGetNewMasterFailed )
+  /\ WF_Vars( C_HandlingMasterGetNewBackupFailed )
+  /\ WF_Vars( C_UpdatingBackupId )
+  /\ WF_Vars( C_UpdatingMasterIdAndBePending )
+  /\ WF_Vars( M_CreatingNewBackup )
+  /\ WF_Vars( B_CreatingNewMaster )
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -540,6 +461,6 @@ Spec ==  Init /\ [][Next]_Vars /\ Liveness
 THEOREM Spec => []( TypeOK /\ StateOK)
 =============================================================================
 \* Modification History
+\* Last modified Wed Mar 21 15:17:09 AEDT 2018 by u5482878
 \* Last modified Wed Mar 21 01:39:56 AEDT 2018 by shamouda
-\* Last modified Tue Mar 20 15:30:27 AEDT 2018 by u5482878
 \* Created Mon Mar 05 13:44:57 AEDT 2018 by u5482878

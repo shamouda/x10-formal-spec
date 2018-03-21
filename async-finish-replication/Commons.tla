@@ -3,7 +3,7 @@ EXTENDS Integers
 CONSTANTS CLIENT_NUM,     \* the number of clients                        
           MAX_KILL        \* maximum allowed kill events                  
 
-VARIABLES exec_state,     \* the execution state of the program: running, terminated, or fatal   
+VARIABLES exec_state,     \* the execution state of the program: running, success, or fatal   
           clients,        \* clients sending value update requests to master and backup                            
           master,         \* pool of master instances, only one is active 
           backup,         \* pool of backup instances, only one is active 
@@ -21,14 +21,10 @@ NOT_INSTANCE_ID == -1
 INST_STATUS_NULL == "null"   \* null, not used yet
 INST_STATUS_ACTIVE == "active" \* active and handling client requests
 INST_STATUS_LOST == "lost"   \* lost
-INST_STATUS_BUSY == "busy"   \* busy recoverying the other replica
 NOT_STATUS == "invalid"        \* invalid status
 INSTANCE_STATUS == { INST_STATUS_NULL, 
                      INST_STATUS_ACTIVE, 
-                     INST_STATUS_LOST,
-                     INST_STATUS_BUSY }
-
-LiveStatus == { INST_STATUS_ACTIVE, INST_STATUS_BUSY }
+                     INST_STATUS_LOST }
 
 (* Master instance record structure *)
 Master == [ id:INSTANCE_ID, backupId:INSTANCE_ID \cup {UNKNOWN_ID}, 
@@ -45,14 +41,6 @@ Backup == [ id:INSTANCE_ID, masterId:INSTANCE_ID \cup {UNKNOWN_ID},
 (* Invalid backup instance *)
 NOT_BACKUP == [ id |-> NOT_INSTANCE_ID, masterId |-> NOT_INSTANCE_ID, 
                 status |-> NOT_STATUS, value |-> -1, version |-> -1 ]
-
-SearchForMaster ==
-  (*************************************************************************)
-  (* Return the live master, or NOT_MASTER if master is lost               *)
-  (*************************************************************************)
-  LET mset == { m \in INSTANCE_ID : master[m].status \in LiveStatus }
-  IN IF mset = {} THEN NOT_MASTER
-     ELSE master[(CHOOSE x \in mset : TRUE)]
 
 LastLostMaster ==
   (*************************************************************************)
@@ -77,14 +65,6 @@ LastKnownMaster ==
   LET mset == { m \in INSTANCE_ID : master[m].status # INST_STATUS_NULL }
   IN master[(CHOOSE n \in mset : \A m \in mset : n \geq m)]
   
-LiveBackup ==
-  (*************************************************************************)
-  (* Return the active back, or NOT_BACKUP if backup is lost or busy       *)
-  (*************************************************************************)
-  LET bset == { b \in INSTANCE_ID : backup[b].status \in LiveStatus }
-  IN IF bset = {} THEN NOT_BACKUP
-     ELSE backup[(CHOOSE x \in bset : TRUE)]
-
 FindBackup(bStatus) == 
   (*************************************************************************)
   (* Return the backup with given status or NOT_BACKUP otherwise           *)
@@ -101,14 +81,6 @@ LastLostBackup ==
   IN IF bset = {} THEN NOT_BACKUP
      ELSE backup[(CHOOSE n \in bset : \A m \in bset : n \geq m)]
 
-SearchForBackup ==
-  (*************************************************************************)
-  (* Return the live backup, or NOT_BACKUP if backup is lost               *)
-  (*************************************************************************)
-  LET bset == { b \in INSTANCE_ID : backup[b].status \in LiveStatus }
-  IN IF bset = {} THEN NOT_BACKUP
-     ELSE backup[(CHOOSE x \in bset : TRUE)]
-     
 LastKnownBackup ==
   (*************************************************************************)
   (* Return the last known backup, whether active, busy or lost            *)
@@ -153,12 +125,10 @@ Messages == [ from:{"c","m","b","sys"}, to:{"c","m","b"},
               masterId:INSTANCE_ID \cup {UNKNOWN_ID},
               backupId:INSTANCE_ID \cup {UNKNOWN_ID},
               value:Nat,
-              tag:{ "masterDo", "backupDo",   
-                    "masterDone", "backupDone", 
-                    "masterDoFailed", "backupDoFailed",
-                    "masterGetNewBackup", "backupGetNewMaster",
-                    "newBackupId", "newMasterId",
-                    "backupGetNewMasterFailed", "masterGetNewBackupFailed"  
+              tag:{ "masterDo", "masterDone",   
+                    "backupDo", "backupDone", 
+                    "masterGetNewBackup", "newBackupId",
+                    "backupGetNewMaster", "newMasterId"
                   } ]
 
 (* Invalid message instance *)
@@ -213,6 +183,6 @@ FindMessageToClient(from, tag) ==
 
 =============================================================================
 \* Modification History
+\* Last modified Wed Mar 21 15:10:34 AEDT 2018 by u5482878
 \* Last modified Wed Mar 21 00:40:31 AEDT 2018 by shamouda
-\* Last modified Tue Mar 20 15:30:59 AEDT 2018 by u5482878
 \* Created Mon Mar 05 13:44:57 AEDT 2018 by u5482878
