@@ -460,7 +460,3 @@ Spec ==  Init /\ [][Next]_Vars /\ Liveness
 
 THEOREM Spec => []( TypeOK /\ StateOK)
 =============================================================================
-\* Modification History
-\* Last modified Wed Mar 21 15:17:09 AEDT 2018 by u5482878
-\* Last modified Wed Mar 21 01:39:56 AEDT 2018 by shamouda
-\* Created Mon Mar 05 13:44:57 AEDT 2018 by u5482878

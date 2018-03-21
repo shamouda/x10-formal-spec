@@ -60,7 +60,7 @@ FindMaster(mStatus) ==
 
 LastKnownMaster ==
   (*************************************************************************)
-  (* Return the last known master, whether active, busy or lost            *)
+  (* Return the last known master, whether active or lost                  *)
   (*************************************************************************)
   LET mset == { m \in INSTANCE_ID : master[m].status # INST_STATUS_NULL }
   IN master[(CHOOSE n \in mset : \A m \in mset : n \geq m)]
@@ -83,7 +83,7 @@ LastLostBackup ==
 
 LastKnownBackup ==
   (*************************************************************************)
-  (* Return the last known backup, whether active, busy or lost            *)
+  (* Return the last known backup, whether active or lost                  *)
   (*************************************************************************)
   LET bset == { m \in INSTANCE_ID : backup[m].status # INST_STATUS_NULL }
   IN backup[(CHOOSE n \in bset : \A m \in bset : n \geq m)]
@@ -182,7 +182,3 @@ FindMessageToClient(from, tag) ==
      ELSE ( CHOOSE x \in mset : TRUE ) 
 
 =============================================================================
-\* Modification History
-\* Last modified Wed Mar 21 15:10:34 AEDT 2018 by u5482878
-\* Last modified Wed Mar 21 00:40:31 AEDT 2018 by shamouda
-\* Created Mon Mar 05 13:44:57 AEDT 2018 by u5482878
