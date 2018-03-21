@@ -27,6 +27,31 @@ TypeOK ==
   /\ msgs \subseteq C!Messages
   /\ killed \in 0..MAX_KILL
 
+----------------------------------------------------------------------------
+MaxOneActiveMaster ==
+  (*************************************************************************)
+  (* Return true if maximum one active master exists, and false otherwise  *)
+  (*************************************************************************)
+  LET activeM == C!FindMaster(C!INST_STATUS_ACTIVE)
+      otherIds == C!INSTANCE_ID \ { activeM.id }
+  IN IF activeM = C!NOT_MASTER
+     THEN TRUE \* zero active masters
+     ELSE LET otherActiveMs == { m \in otherIds : master[m].status = C!INST_STATUS_ACTIVE }
+          IN IF otherActiveMs = {} THEN TRUE \* no other active masters
+             ELSE FALSE \* other active masters exist
+
+MaxOneActiveBackup ==
+  (*************************************************************************)
+  (* Return true if maximum one active backup exists, and false otherwise  *)
+  (*************************************************************************)
+  LET activeB == C!FindBackup(C!INST_STATUS_ACTIVE)
+      otherIds == C!INSTANCE_ID \ { activeB.id }
+  IN IF activeB = C!NOT_BACKUP
+     THEN TRUE \* zero active backups
+     ELSE LET otherActiveBs == { b \in otherIds : backup[b].status = C!INST_STATUS_ACTIVE }
+          IN IF otherActiveBs = {} THEN TRUE \* no other active backups
+             ELSE FALSE \* other active backup exist
+  
 StateOK ==
   (*************************************************************************)
   (* State invariants:                                                     *)
@@ -38,6 +63,8 @@ StateOK ==
   LET curMaster == C!LastKnownMaster
       curBackup == C!LastKnownBackup
   IN /\ curMaster.version >= curBackup.version
+     /\ MaxOneActiveMaster
+     /\ MaxOneActiveBackup
      /\ IF exec_state = "success"
         THEN /\ curMaster.version = CLIENT_NUM 
              /\ curBackup.version = CLIENT_NUM
@@ -84,21 +111,11 @@ Init ==
   /\ killed = 0
   
 ----------------------------------------------------------------------------
-AtLeastOneClientStarted ==
-  (*************************************************************************)
-  (* We use this condition to prevent killing a master or backup before at *)
-  (* least one client starts                                               *)
-  (*************************************************************************) 
-  \/ /\ killed > 0 
-  \/ /\ killed = 0 
-     /\ \E c \in C!CLIENT_ID : clients[c].phase # C!PH1_PENDING
-
 E_KillingMaster ==
   (*************************************************************************)
   (* Kill the active master instance.                                      *)
   (*************************************************************************)
   /\ exec_state = "running"
-  /\ AtLeastOneClientStarted
   /\ killed < MAX_KILL
   /\ LET activeM == C!FindMaster(C!INST_STATUS_ACTIVE)
      IN /\ activeM # C!NOT_MASTER
@@ -111,7 +128,6 @@ E_KillingBackup ==
   (* Kill the active backup instance.                                      *)
   (*************************************************************************)
   /\ exec_state = "running"
-  /\ AtLeastOneClientStarted
   /\ killed < MAX_KILL
   /\ LET activeB == C!FindBackup(C!INST_STATUS_ACTIVE)
      IN /\ activeB # C!NOT_BACKUP
@@ -179,28 +195,39 @@ B_Doing ==
   /\ exec_state = "running"
   /\ LET msg == C!FindMessageToWithTag("b", C!INST_STATUS_ACTIVE, "backupDo")
      IN /\ msg # C!NOT_MESSAGE
-        /\ IF msg.masterId = backup[msg.backupId].masterId
-           THEN (* Master info is consistent between client and backup *)
-                /\ backup' = [ backup EXCEPT ![msg.backupId].value = backup[msg.backupId].value + msg.value,
-                                             ![msg.backupId].version = backup[msg.backupId].version + 1 ]
-                /\ C!ReplaceMsg( msg, [ from |-> "b",
-                                      to |-> "c",
-                                      clientId |-> msg.clientId,
-                                      masterId |-> msg.masterId,
-                                      backupId |-> msg.backupId,
-                                      value |-> 0,
-                                      tag |-> "backupDone" ] )
-           ELSE (* Master has changed, client must restart *)
-                /\ backup' = backup  
-                /\ C!ReplaceMsg( msg, [ from |-> "b",
-                                      to |-> "c",
-                                      clientId |-> msg.clientId,
-                                      masterId |-> backup[msg.backupId].masterId,
-                                      backupId |-> msg.backupId,
-                                      value |-> 0,
-                                      tag |-> "newMasterId" ] )
+           (* Master info is consistent between client and backup *)
+        /\ msg.masterId = backup[msg.backupId].masterId
+        /\ backup' = [ backup EXCEPT ![msg.backupId].value = backup[msg.backupId].value + msg.value,
+                                     ![msg.backupId].version = backup[msg.backupId].version + 1 ]
+        /\ C!ReplaceMsg( msg, [ from |-> "b",
+                              to |-> "c",
+                              clientId |-> msg.clientId,
+                              masterId |-> msg.masterId,
+                              backupId |-> msg.backupId,
+                              value |-> 0,
+                              tag |-> "backupDone" ] )
   /\ UNCHANGED << exec_state, clients, master, killed >>
- 
+
+B_DetectingOldMasterId == 
+  (*************************************************************************)
+  (* Backup receiving "do" and detecting that the client is using an old   *)
+  (* master id. It does not update the value, and it sends the new master  *)
+  (* id to the client                                                      *)
+  (*************************************************************************)
+  /\ exec_state = "running"
+  /\ LET msg == C!FindMessageToWithTag("b", C!INST_STATUS_ACTIVE, "backupDo")
+     IN /\ msg # C!NOT_MESSAGE
+           (* Master has changed, client must restart *)
+        /\ msg.masterId # backup[msg.backupId].masterId
+        /\ C!ReplaceMsg( msg, [ from |-> "b",
+                              to |-> "c",
+                              clientId |-> msg.clientId,
+                              masterId |-> backup[msg.backupId].masterId,
+                              backupId |-> msg.backupId,
+                              value |-> 0,
+                              tag |-> "newMasterId" ] )
+  /\ UNCHANGED << exec_state, clients, master, backup, killed >>
+
 C_HandlingBackupDone ==
   (*************************************************************************)
   (* Client receiving "done" from backup. Replication completed            *)
@@ -357,9 +384,8 @@ C_UpdatingBackupId ==
            THEN exec_state' = "success"
            ELSE exec_state' = exec_state
   /\ UNCHANGED << master, backup, killed >>
-  
 
-C_UpdatingMasterIdAndBePending ==
+C_UpdatingMasterId ==
   (*************************************************************************)
   (* Client receiving a new master identify from a live backup and is      *)
   (* preparing to restart by changing its phase to pending                 *)
@@ -421,6 +447,7 @@ Next ==
   \/ M_Doing
   \/ C_HandlingMasterDone
   \/ B_Doing
+  \/ B_DetectingOldMasterId
   \/ C_HandlingBackupDone
   \/ C_HandlingMasterDoFailed
   \/ C_HandlingBackupDoFailed
@@ -429,7 +456,7 @@ Next ==
   \/ C_HandlingBackupGetNewMasterFailed
   \/ C_HandlingMasterGetNewBackupFailed
   \/ C_UpdatingBackupId
-  \/ C_UpdatingMasterIdAndBePending
+  \/ C_UpdatingMasterId
   \/ M_CreatingNewBackup
   \/ B_CreatingNewMaster
   
@@ -440,6 +467,7 @@ Liveness ==
   /\ WF_Vars( M_Doing )
   /\ WF_Vars( C_HandlingMasterDone )
   /\ WF_Vars( B_Doing )
+  /\ WF_Vars( B_DetectingOldMasterId )
   /\ WF_Vars( C_HandlingBackupDone )
   /\ WF_Vars( C_HandlingMasterDoFailed )
   /\ WF_Vars( C_HandlingBackupDoFailed )
@@ -448,7 +476,7 @@ Liveness ==
   /\ WF_Vars( C_HandlingBackupGetNewMasterFailed )
   /\ WF_Vars( C_HandlingMasterGetNewBackupFailed )
   /\ WF_Vars( C_UpdatingBackupId )
-  /\ WF_Vars( C_UpdatingMasterIdAndBePending )
+  /\ WF_Vars( C_UpdatingMasterId )
   /\ WF_Vars( M_CreatingNewBackup )
   /\ WF_Vars( B_CreatingNewMaster )
 

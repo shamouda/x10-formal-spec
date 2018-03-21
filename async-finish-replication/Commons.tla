@@ -85,7 +85,7 @@ LastKnownBackup ==
   (*************************************************************************)
   (* Return the last known backup, whether active or lost                  *)
   (*************************************************************************)
-  LET bset == { m \in INSTANCE_ID : backup[m].status # INST_STATUS_NULL }
+  LET bset == { b \in INSTANCE_ID : backup[b].status # INST_STATUS_NULL }
   IN backup[(CHOOSE n \in bset : \A m \in bset : n \geq m)]
 
 ----------------------------------------------------------------------------
