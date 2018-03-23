@@ -1,17 +1,17 @@
 ---------------------------- MODULE AsyncFinishReplication ----------------------------
-(**************************************************************************)
 EXTENDS Integers
 
-CONSTANTS CLIENT_NUM,     \* the number of clients                        
-          MAX_KILL        \* maximum allowed kill events                  
+CONSTANTS CLIENT_NUM, \* the number of clients                        
+          MAX_KILL    \* maximum allowed kill events                  
 
-VARIABLES exec_state,     \* the execution state of the program: running, success, or fatal   
-          clients,        \* clients sending value update requests to master and backup                            
-          master,         \* pool of master instances, only one is active 
-          backup,         \* pool of backup instances, only one is active 
-          msgs,           \* in-flight messages                           
-          killed          \* number of invoked kill actions to master or backup                                       
+VARIABLES exec_state, \* the execution state of the program: running, success, or fatal   
+          clients,    \* clients sending value update requests to master and backup                            
+          master,     \* array of master instances, only one is active 
+          backup,     \* array of backup instances, only one is active 
+          msgs,       \* in-flight messages                           
+          killed      \* number of invoked kill actions to master or backup          
 
+----------------------------------------------------------------------------                                       
 Vars == << exec_state, clients, master, backup, msgs, killed >>
 ----------------------------------------------------------------------------
 C == INSTANCE Commons
@@ -51,42 +51,43 @@ MaxOneActiveBackup ==
      ELSE LET otherActiveBs == { b \in otherIds : backup[b].status = C!INST_STATUS_ACTIVE }
           IN IF otherActiveBs = {} THEN TRUE \* no other active backups
              ELSE FALSE \* other active backup exist
-  
+
 StateOK ==
   (*************************************************************************)
-  (* State invariants:                                                     *)
-  (* - master version >= backup version                                    *)
-  (* - upon termination, the final version = the number of clients         *)
-  (* - if a fatal error occured, this must indicate the failure of both    *)
-  (*   the master and the backup known by the client                       *)
+  (* State invariants                                                      *)
+  (* 1. on successful termination: the final version equals CLIENT_NUM     *)
+  (* 2. on fatal termination: there must be a client whose master is lost  *)
+  (*   and whose backup is lost or is unknown                              *)
+  (* 3. before termination:                                                *)
+  (*   a) master version >= backup version                                 *)
+  (*   b) master and backup version should not exceed CLIENT_NUM           *)
+  (*   c) maximum one active master and maximum one active backup          *)
   (*************************************************************************)
   LET curMaster == C!LastKnownMaster
       curBackup == C!LastKnownBackup
-  IN /\ curMaster.version >= curBackup.version
-     /\ MaxOneActiveMaster
-     /\ MaxOneActiveBackup
-     /\ IF exec_state = "success"
-        THEN /\ curMaster.version = CLIENT_NUM 
-             /\ curBackup.version = CLIENT_NUM
-        ELSE /\ curMaster.version <= CLIENT_NUM 
-             /\ curBackup.version <= CLIENT_NUM
-     /\ IF exec_state = "fatal"
-        THEN \E c \in C!CLIENT_ID : 
-                /\ clients[c].phase = C!PH2_COMPLETED_FATAL
-                /\ master[clients[c].masterId].status = C!INST_STATUS_LOST
-                /\ IF clients[c].backupId # C!UNKNOWN_ID
-                   THEN backup[clients[c].backupId].status = C!INST_STATUS_LOST
-                   ELSE TRUE
-        ELSE TRUE
+  IN  IF exec_state = "success"
+      THEN /\ curMaster.version = CLIENT_NUM 
+           /\ curBackup.version = CLIENT_NUM
+      ELSE IF exec_state = "fatal"
+      THEN \E c \in C!CLIENT_ID : 
+              /\ clients[c].phase = C!PH2_COMPLETED_FATAL
+              /\ master[clients[c].masterId].status = C!INST_STATUS_LOST
+              /\ IF clients[c].backupId # C!UNKNOWN_ID
+                 THEN backup[clients[c].backupId].status = C!INST_STATUS_LOST
+                 ELSE TRUE
+      ELSE /\ curMaster.version >= curBackup.version
+           /\ curMaster.version <= CLIENT_NUM 
+           /\ curBackup.version <= CLIENT_NUM
+           /\ MaxOneActiveMaster
+           /\ MaxOneActiveBackup
 
-----------------------------------------------------------------------------             
+----------------------------------------------------------------------------   
 MustTerminate ==
   (*************************************************************************)
-  (* The program must terminate by having all clients complete their       *)
-  (* update actions on both master and backup                              *)
+  (* Temporal property: the program must eventually terminate either       *)
+  (* successully or fatally                                                *) 
   (*************************************************************************)
    <> ( exec_state \in { "success", "fatal" } )
-
 ----------------------------------------------------------------------------
 Init ==
   (*************************************************************************)

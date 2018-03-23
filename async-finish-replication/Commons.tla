@@ -1,15 +1,17 @@
 ---------------------------- MODULE Commons --------------------------------
 EXTENDS Integers
-CONSTANTS CLIENT_NUM,     \* the number of clients                        
-          MAX_KILL        \* maximum allowed kill events                  
 
-VARIABLES exec_state,     \* the execution state of the program: running, success, or fatal   
-          clients,        \* clients sending value update requests to master and backup                            
-          master,         \* pool of master instances, only one is active 
-          backup,         \* pool of backup instances, only one is active 
-          msgs,           \* in-flight messages                           
-          killed          \* number of invoked kill actions to master or backup          
+CONSTANTS CLIENT_NUM, \* the number of clients                        
+          MAX_KILL    \* maximum allowed kill events                  
+
+VARIABLES exec_state, \* the execution state of the program: running, success, or fatal   
+          clients,    \* clients sending value update requests to master and backup                            
+          master,     \* array of master instances, only one is active 
+          backup,     \* array of backup instances, only one is active 
+          msgs,       \* in-flight messages                           
+          killed      \* number of invoked kill actions to master or backup          
 ----------------------------------------------------------------------------
+
 (* Identifiers related to master and backup instance ids *)
 FIRST_ID == 1
 MAX_INSTANCE_ID == MAX_KILL+1
