@@ -85,13 +85,13 @@ StateOK ==
 MustTerminate ==
   (*************************************************************************)
   (* Temporal property: the program must eventually terminate either       *)
-  (* successully or fatally                                                *) 
+  (* successfully or fatally                                               *) 
   (*************************************************************************)
    <> ( exec_state \in { "success", "fatal" } )
 ----------------------------------------------------------------------------
 Init ==
   (*************************************************************************)
-  (* Initialiaze variables                                                 *)
+  (* Initialize variables                                                  *)
   (*************************************************************************)
   /\ exec_state = "running"
   /\ clients = [ i \in C!CLIENT_ID |->  [ id |-> i , phase |-> C!PH1_PENDING, 

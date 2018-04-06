@@ -7,4 +7,4 @@
    We do so by sending the already known identity and if still not changed we don't respond to the client *)
 (* Client does not die *)
 (* We assume all failure reporting by the system is 100% accurate, no false positives *)
-(* The client's only way to know about the backup id is through the master, if masterDoFailed, must search for backup*)
+(* The client's only way to know about the backup id is through the master, if masterDoFailed, it must search for the backup*)
