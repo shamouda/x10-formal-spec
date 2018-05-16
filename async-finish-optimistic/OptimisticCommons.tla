@@ -1,5 +1,5 @@
 ---------------------------- MODULE OptimisticCommons --------------------------------
-(*always create finish as a child of a task, not a child of another finish*)
+(* Constants and common utility actions                                             *)
 EXTENDS Integers
 
 CONSTANTS LEVEL,
@@ -404,5 +404,42 @@ FindFromDeadWaitingRequest(fin_id, from, to) ==
   CHOOSE x \in rec_from_waiting : /\ x.finish_id = fin_id
                                   /\ x.from = from
                                   /\ x.to = to
-                                  
+
+ApplyTerminateSignal(rf, rf_updated, msg) == 
+  IF rf_updated.gc = 0 /\ rf_updated.ghost_children = {}
+  THEN IF rf.isAdopted
+       THEN /\ ReplaceMsg(msg, [ from |-> "rf", to |-> "rf", tag |-> "terminateGhost",
+                                   finish_id |-> rf.parent_finish_id,
+                                   ghost_finish_id |-> rf.id,
+                                   dst |-> NOT_PLACE_ID ]) \* rf.id is enough
+            /\ rf_set' = rf_set \ { rf } 
+       ELSE /\ ReplaceMsg(msg, [ from |-> "rf", to |-> "f", tag |-> "release",
+                                   finish_id |-> rf.id,
+                                   dst |-> rf.home ]) 
+            /\ rf_set' = rf_set \ { rf }
+  ELSE /\ RecvMsg(msg)
+       /\ rf_set' = ( rf_set \ {rf} ) \cup { rf_updated } 
+
+ApplyTerminateSignal2(rf, rf_updated) == 
+  IF rf_updated.gc = 0 /\ rf_updated.ghost_children = {}
+  THEN IF rf.isAdopted
+       THEN /\ SendMsg([ from |-> "rf", to |-> "rf", tag |-> "terminateGhost",
+                           finish_id |-> rf.parent_finish_id,
+                           ghost_finish_id |-> rf.id,
+                           dst |-> NOT_PLACE_ID ]) \* rf.id is enough
+            /\ rf_set' = rf_set \ { rf }
+       ELSE /\ SendMsg([ from |-> "rf", to |-> "f", tag |-> "release",
+                           finish_id |-> rf.id,
+                           dst |-> rf.home ])
+            /\ rf_set' = rf_set \ { rf }
+  ELSE /\ msgs' = msgs
+       /\ rf_set' = ( rf_set \ {rf} ) \cup { rf_updated } 
+       
+RecvTerminateSignal(msg) ==
+  /\ RecvMsg(msg)
+  /\ rf_set' = rf_set
+
+RecvCountDroppedResponse(msg) == 
+   /\ RecvMsg(msg)
+   /\ rf_set' = rf_set 
 =============================================================================

@@ -1,36 +1,60 @@
------------------------------ MODULE Optimistic -----------------------------
+----------------------------- MODULE Optimistic ------------------------------
+(*****************************************************************************)
+(* This specification models the 'optimistic finish' protocol used for       *)
+(* detecting the termination of async-finish task graphs.                    *)
+(* We model the graph as connected nodes of tasks. Finish objects do not     *)
+(* represent separate nodes in the task graph, but implicit objects attached *)
+(* to tasks.                                                                 *)
+(*                                                                           *)
+(* The model simulates all possible n-level task graphs that can be created  *)
+(* on a p-place system, where each node of the task graph has c children.    *)
+(* The variables LEVEL, NUM_PLACES and WIDTH can be used to configure the    *)
+(* graph. The model also permits simulating 0 or more failures by configuring*)
+(* the MAX_KILL variable.                                                    *)
+(*                                                                           *)
+(* For the model checker to generate all possible execution scenarios, it    *)
+(* can run out of memory, specially when activating failure recovery actions.*)
+(* We introduced the variables KILL_FROM and KILL_TO to control the range of *)
+(* steps at which failures can occur, so that we can cut the verification    *)
+(* process into multiple phases.                                             *) 
+(* For example, we used 4 phases to simulate all possible execution scenarios*)
+(* for a 3-level 3-place task tree with width 2, that takes around 50 steps  *)
+(* in total:                                                                 *)
+(* Phase 1: kills a place between steps 0 and 20.                            *)
+(* Phase 2: kills a place between steps 20 and 30.                           *)
+(* Phase 3: kills a place between steps 30 and 50.                           *)
+(* Phase 4: kills a place between steps 50 and 100.                          *)
+(*                                                                           *)
+(* See the run figures at:                                                   *)
+(* https://github.com/shamouda/x10-formal-spec/tree/master/async-finish-optimistic/run_figures *)  
+(****************************************************************************)
 EXTENDS Integers
 
-CONSTANTS LEVEL,
-          WIDTH,
-          NUM_PLACES,
-          MAX_KILL,
-          KILL_FROM,
-          KILL_TO
+CONSTANTS LEVEL,             \* task tree levels
+          WIDTH,             \* task tree branching factor
+          NUM_PLACES,        \* number of places
+          MAX_KILL,          \* maximum number of failures to simulate
+          KILL_FROM, KILL_TO \* the range of steps to simulate a failure at
 
-VARIABLES exec_state, \* execution state
-          tasks,      \* set of tasks
-          f_set,      \* finish objects
-          lf_set,     \* local finish objects
-          rf_set,     \* resilient finish objects
-          msgs,       \* msgs
-          nxt_finish_id, \* sequence to create unique finish ids
-          nxt_task_id,    \* sequence to create unique task ids
-          nxt_remote_place,
-          killed,
-          killed_cnt,
-          rec_child,
-          rec_to,
-          rec_from,
-          rec_from_waiting,
-          lost_tasks,
-          lost_f_set,
-          lost_lf_set,
-          step
-
-\* TODO: we need to publish the parent if not published
-\* send multiple publish messages for parent - grand parent - grand grand parent
-\* the store needs to do them in order from top to buttom
+VARIABLES exec_state,      \* execution state
+          tasks,           \* set of tasks
+          f_set,           \* finish objects
+          lf_set,          \* local finish objects
+          rf_set,          \* resilient finish objects
+          msgs,            \* msgs
+          nxt_finish_id,   \* sequence of finish ids
+          nxt_task_id,     \* sequence of task ids
+          nxt_remote_place,\* next place to communicate with
+          killed,          \* set of killed places
+          killed_cnt,      \* size of the killed set
+          rec_child,       \* pending recovery actions: ghosts queries
+          rec_to,          \* pending recovey actions: ignoring tasks to dead places
+          rec_from,        \* pending recovey actions: counting messages from dead places
+          rec_from_waiting,\* pernding recovery actions: receiving counts of messages from dead places
+          lost_tasks,      \* debug variable: set of lost tasks due to a failure
+          lost_f_set,      \* debug variable: set of lost finishes
+          lost_lf_set,     \* debug variable: set of lost local finishes 
+          step             \* the exectution step of the model
 
 Vars == << exec_state, tasks, f_set, lf_set, rf_set, msgs, 
            nxt_finish_id, nxt_task_id, nxt_remote_place,
@@ -61,15 +85,6 @@ TypeOK ==
   /\ rec_from_waiting \subseteq C!ConvTask
   /\ step \in Nat
    
-StateOK == 
-  (*************************************************************************)
-  (* State invariants:                                                     *)
-  (* - every finish that sent a remote task must have a remote finish      *)
-  (* - for every local finish at P, the received[X] <= rf.sent[fhome][P]   *)
-  (* - upon successful termination, all tasks are either terminated or lost*)
-  (*************************************************************************)
-  /\ TRUE
-
 ----------------------------------------------------------------------------   
 MustTerminate ==
   (*************************************************************************)
@@ -102,6 +117,11 @@ Init ==
   /\ rec_from_waiting = {}
   /\ step = 0
 
+----------------------------------------------------------------------------  
+(*************************************************************************)
+(* Utility actions: creating instances of task, finish, resilient finish *)
+(* and local finish                                                      *)
+(*************************************************************************)
 NewFinish(task) ==
 [ id |-> nxt_finish_id,
   pred_id |-> task.id,
@@ -144,7 +164,10 @@ NewTask(pred, fid, s, d, t , l, st, fin_type) ==
   finish_type |-> fin_type ]
                            
 ---------------------------------------------------------------------------- 
-CreatingFinish == 
+(*************************************************************************)
+(* Finish Actions                                                        *)
+(*************************************************************************)
+Task_CreatingFinish == 
   /\ exec_state = "running"
   /\ LET task == C!FindRunningTask(LEVEL-1)
          task_updated == IF task = C!NOT_TASK THEN C!NOT_TASK
@@ -168,57 +191,8 @@ CreatingFinish ==
                   killed, killed_cnt,
                   lost_tasks, lost_f_set, lost_lf_set,
                   rec_child, rec_to, rec_from, rec_from_waiting >>
-
-Finish_ForkingLocalTask ==  \* fork local task by global finish
-  /\ exec_state = "running"
-  /\ LET task == C!FindRunningTaskWithFinishType(LEVEL-1, "global")
-         task_updated == IF task = C!NOT_TASK THEN C!NOT_TASK
-                         ELSE [ task EXCEPT !.last_branch = task.last_branch+1 ]
-         src == task.dst
-         dst == task.dst
-         new_task == IF task = C!NOT_TASK THEN C!NOT_TASK
-                     ELSE NewTask(task.id, task.finish_id, task.dst, task.dst, "normal", task.level + 1, "running", task.finish_type)
-         finish == IF task = C!NOT_TASK THEN C!NOT_FINISH
-                   ELSE C!FindFinishById(task.finish_id)
-         finish_updated == IF task = C!NOT_TASK THEN C!NOT_FINISH
-                           ELSE [finish EXCEPT !.lc = finish.lc + 1 ]          
-     IN /\ task # C!NOT_TASK
-        /\ finish # C!NOT_FINISH
-        /\ nxt_task_id' = nxt_task_id + 1
-        /\ f_set' = ( f_set \ {finish} ) \cup { finish_updated }
-        /\ tasks' = (tasks \ {task} ) \cup { task_updated, new_task }
-        /\ step' = step + 1
-  /\ UNCHANGED << exec_state, lf_set, rf_set, msgs, 
-                  nxt_finish_id, nxt_remote_place,
-                  killed, killed_cnt,
-                  lost_tasks, lost_f_set, lost_lf_set,
-                  rec_child, rec_to, rec_from, rec_from_waiting >>
-      
-LocalFinish_ForkingLocalTask ==  \* create local task with status created and put it in the set
-  /\ exec_state = "running"
-  /\ LET task == C!FindRunningTaskWithFinishType(LEVEL-1, "local")
-         task_updated == IF task = C!NOT_TASK THEN C!NOT_TASK
-                         ELSE [ task EXCEPT !.last_branch = task.last_branch+1 ]
-         src == task.dst
-         finish_id == task.finish_id
-         new_task == IF task = C!NOT_TASK THEN C!NOT_TASK
-                     ELSE NewTask(task.id, task.finish_id, src, src, "normal", task.level + 1, "running", task.finish_type)
-         lfinish == IF task = C!NOT_TASK THEN C!NOT_FINISH
-                    ELSE C!FindLocalFinish(src, finish_id)
-         lfinish_updated == [ lfinish EXCEPT !.received[src] = lfinish.received[src] + 1,
-                                             !.lc = lfinish.lc + 1 ]
-     IN /\ task # C!NOT_TASK
-        /\ nxt_task_id' = nxt_task_id + 1
-        /\ lf_set' = ( lf_set \ { lfinish } ) \cup { lfinish_updated }
-        /\ tasks' = (tasks \ { task } ) \cup { task_updated, new_task }
-        /\ step' = step + 1
-  /\ UNCHANGED << exec_state, f_set, rf_set, msgs, 
-                  nxt_finish_id, nxt_remote_place,
-                  killed, killed_cnt,
-                  lost_tasks, lost_f_set, lost_lf_set,
-                  rec_child, rec_to, rec_from, rec_from_waiting >>
                   
-Finish_CreatingRemoteTask ==  \* create task with status created and put it in the set
+Finish_CreatingRemoteTask == 
   /\ exec_state = "running"
   /\ LET task == C!FindRunningTaskWithFinishType(LEVEL-1, "global")
          task_updated == IF task = C!NOT_TASK THEN C!NOT_TASK
@@ -347,7 +321,10 @@ Finish_ReceivingReleaseSignal ==
                   lost_tasks, lost_f_set, lost_lf_set,
                   rec_child, rec_to, rec_from, rec_from_waiting >>
 
-----------------------------------------------------------------------
+--------------------------------------------------------------------------
+(*************************************************************************)
+(* Actions applicable to Finish and Local Finish                         *)
+(*************************************************************************)
 DroppingTask ==
   /\ exec_state = "running"
   /\ LET msg == C!FindMessageToActivePlaceWithTag("src", "transitNotDone")
@@ -422,7 +399,10 @@ ReceivingTask ==
                   lost_tasks, lost_f_set, lost_lf_set,
                   rec_child, rec_to, rec_from, rec_from_waiting >>
 
--------------------------------------------------------------------------------------- 
+--------------------------------------------------------------------------
+(*************************************************************************)
+(* Local Finish Actions                                                  *)
+(*************************************************************************)
 LocalFinish_CreatingRemoteTask ==  \* create task with status created and put it in the set
   /\ exec_state = "running"
   /\ LET task == C!FindRunningTaskWithFinishType(LEVEL-1, "local")
@@ -488,7 +468,7 @@ LocalFinish_TerminatingTask ==
                   lost_tasks, lost_f_set, lost_lf_set,
                   rec_child, rec_to, rec_from, rec_from_waiting >>
 
-LocalFinish_CountingDroppedTasksFromDeadPlace == 
+LocalFinish_MarkingDeadPlace == 
   /\ exec_state = "running"
   /\ LET msg == C!FindMessageToActivePlaceWithTag("dst", "countDropped")
          finish_id == msg.finish_id
@@ -514,7 +494,10 @@ LocalFinish_CountingDroppedTasksFromDeadPlace ==
                   lost_tasks, lost_f_set, lost_lf_set,
                   rec_child, rec_to, rec_from, rec_from_waiting >>
   
-----------------------------------------------------------------------------
+--------------------------------------------------------------------------
+(*************************************************************************)
+(* Resilient Store Actions                                               *)
+(*************************************************************************)
 Store_ReceivingPublishSignal ==
   /\ exec_state = "running"
   /\ LET msg == C!FindMessageToActivePlaceWithTag("rf", "publish")
@@ -565,40 +548,6 @@ Store_ReceivingTransitSignal ==
                   lost_tasks, lost_f_set, lost_lf_set,
                   rec_child, rec_to, rec_from, rec_from_waiting >>
  
-ApplyTerminateSignal(rf, rf_updated, msg) == 
-  IF rf_updated.gc = 0 /\ rf_updated.ghost_children = {}
-  THEN IF rf.isAdopted
-       THEN /\ C!ReplaceMsg(msg, [ from |-> "rf", to |-> "rf", tag |-> "terminateGhost",
-                                   finish_id |-> rf.parent_finish_id,
-                                   ghost_finish_id |-> rf.id,
-                                   dst |-> C!NOT_PLACE_ID ]) \* rf.id is enough
-            /\ rf_set' = rf_set \ { rf } 
-       ELSE /\ C!ReplaceMsg(msg, [ from |-> "rf", to |-> "f", tag |-> "release",
-                                   finish_id |-> rf.id,
-                                   dst |-> rf.home ]) 
-            /\ rf_set' = rf_set \ { rf }
-  ELSE /\ C!RecvMsg(msg)
-       /\ rf_set' = ( rf_set \ {rf} ) \cup { rf_updated } 
-
-ApplyTerminateSignal2(rf, rf_updated) == 
-  IF rf_updated.gc = 0 /\ rf_updated.ghost_children = {}
-  THEN IF rf.isAdopted
-       THEN /\ C!SendMsg([ from |-> "rf", to |-> "rf", tag |-> "terminateGhost",
-                           finish_id |-> rf.parent_finish_id,
-                           ghost_finish_id |-> rf.id,
-                           dst |-> C!NOT_PLACE_ID ]) \* rf.id is enough
-            /\ rf_set' = rf_set \ { rf }
-       ELSE /\ C!SendMsg([ from |-> "rf", to |-> "f", tag |-> "release",
-                           finish_id |-> rf.id,
-                           dst |-> rf.home ])
-            /\ rf_set' = rf_set \ { rf }
-  ELSE /\ msgs' = msgs
-       /\ rf_set' = ( rf_set \ {rf} ) \cup { rf_updated } 
-       
-DropTerminateSignal(msg) ==
-  /\ C!RecvMsg(msg)
-  /\ rf_set' = rf_set
-                                  
 Store_ReceivingTerminateTaskSignal ==
   /\ exec_state = "running"
   /\ LET msg == C!FindMessageToActivePlaceWithTag("rf", "terminateTask")
@@ -618,8 +567,8 @@ Store_ReceivingTerminateTaskSignal ==
         /\ total # -1 \* see C!Sum() definition
         /\ IF dst \notin killed
            THEN /\ ~ C!IsRecoveringTasksToDeadPlaces(rf.id)
-                /\ ApplyTerminateSignal(rf, rf_updated, msg)
-           ELSE DropTerminateSignal(msg)
+                /\ C!ApplyTerminateSignal(rf, rf_updated, msg)
+           ELSE C!RecvTerminateSignal(msg)
         /\ step' = step + 1
   /\ UNCHANGED << exec_state, tasks, f_set, lf_set,
                   nxt_finish_id, nxt_task_id, nxt_remote_place,
@@ -637,7 +586,7 @@ Store_ReceivingTerminateGhostSignal ==
                        ELSE [rf EXCEPT !.ghost_children = rf.ghost_children \ { ghost_child } ]
      IN /\ msg # C!NOT_MESSAGE
         /\ ~ C!IsRecoveringTasksToDeadPlaces(rf.id)
-        /\ ApplyTerminateSignal(rf, rf_updated, msg)
+        /\ C!ApplyTerminateSignal(rf, rf_updated, msg)
         /\ step' = step + 1
   /\ UNCHANGED << exec_state, tasks, f_set, lf_set,
                   nxt_finish_id, nxt_task_id, nxt_remote_place,
@@ -645,7 +594,7 @@ Store_ReceivingTerminateGhostSignal ==
                   lost_tasks, lost_f_set, lost_lf_set,
                   rec_child, rec_to, rec_from, rec_from_waiting >>
 
-Store_MarkingGhostChildrenAsAdopted ==
+Store_FindingGhostChildren ==
   /\ exec_state = "running"
   /\ LET req == C!FindMarkGhostChildrenRequest
          rf == IF req = C!NOT_REQUEST THEN C!NOT_FINISH
@@ -700,7 +649,7 @@ Store_CancellingTasksToDeadPlace ==
                                         !.gc = rf.gc - rf.transOrLive[req.from][req.to] ]
      IN /\ req # C!NOT_REQUEST
         /\ rf # C!NOT_FINISH
-        /\ ApplyTerminateSignal2(rf, rf_updated)
+        /\ C!ApplyTerminateSignal2(rf, rf_updated)
         /\ rec_to' = rec_to \ { req }
         /\ step' = step + 1
   /\ UNCHANGED << exec_state, tasks, f_set, lf_set, 
@@ -734,10 +683,6 @@ Store_SendingCountDroppedSignalToLocalFinish ==
                   lost_tasks, lost_f_set, lost_lf_set,
                   rec_child, rec_to >>
 
-IgnoreCountDroppedResponse(msg) == 
-   /\ C!RecvMsg(msg)
-   /\ rf_set' = rf_set 
-  
 Store_CancellingDroppedTasksFromDeadPlace ==
   /\ exec_state = "running"
   /\ LET msg == C!FindMessageToActivePlaceWithTag("rf", "countDroppedDone")
@@ -755,8 +700,8 @@ Store_CancellingDroppedTasksFromDeadPlace ==
      IN /\ msg # C!NOT_MESSAGE
         /\ rec_from_waiting' = rec_from_waiting \ { req }
         /\ IF msg.num_dropped > 0
-           THEN ApplyTerminateSignal(rf, rf_updated, msg)
-           ELSE IgnoreCountDroppedResponse(msg)
+           THEN C!ApplyTerminateSignal(rf, rf_updated, msg)
+           ELSE C!RecvCountDroppedResponse(msg)
         /\ step' = step + 1
   /\ UNCHANGED << exec_state, tasks, f_set, lf_set, 
                   nxt_finish_id, nxt_task_id, nxt_remote_place,
@@ -825,18 +770,19 @@ Program_Terminating ==
                   lost_tasks, lost_f_set, lost_lf_set,
                   rec_child, rec_to, rec_from, rec_from_waiting >>
   
----------------------------------------------------------------------------- 
+-----------------------------------------------------------------------------------
+(*********************************************************************************)
+(* Possible next actions at each state                                           *)
+(*********************************************************************************) 
 Next ==
-  \/ CreatingFinish
-\*  \/ Finish_ForkingLocalTask
+  \/ Task_CreatingFinish
   \/ Finish_CreatingRemoteTask
   \/ Finish_TerminatingTask
   \/ Finish_ReceivingPublishDoneSignal
   \/ Finish_ReceivingReleaseSignal
-\*  \/ LocalFinish_ForkingLocalTask
   \/ LocalFinish_CreatingRemoteTask
   \/ LocalFinish_TerminatingTask
-  \/ LocalFinish_CountingDroppedTasksFromDeadPlace
+  \/ LocalFinish_MarkingDeadPlace
   \/ SendingTask
   \/ DroppingTask
   \/ ReceivingTask
@@ -844,25 +790,28 @@ Next ==
   \/ Store_ReceivingTransitSignal
   \/ Store_ReceivingTerminateTaskSignal
   \/ Store_ReceivingTerminateGhostSignal
-  \/ Store_MarkingGhostChildrenAsAdopted
+  \/ Store_FindingGhostChildren
   \/ Store_AddingGhostChildren
   \/ Store_CancellingTasksToDeadPlace
   \/ Store_SendingCountDroppedSignalToLocalFinish
   \/ Store_CancellingDroppedTasksFromDeadPlace
   \/ KillingPlace
   \/ Program_Terminating
-     
+
+-----------------------------------------------------------------------------------
+(*********************************************************************************)
+(* We assume weak fairness on all actions (i.e. an action that remains forever   *) 
+(* enabled, must eventually be executed).                                        *)
+(*********************************************************************************)
 Liveness ==
-  /\ WF_Vars( CreatingFinish )
-\*  /\ WF_Vars( Finish_ForkingLocalTask )
+  /\ WF_Vars( Task_CreatingFinish )
   /\ WF_Vars( Finish_CreatingRemoteTask )
   /\ WF_Vars( Finish_TerminatingTask )
   /\ WF_Vars( Finish_ReceivingPublishDoneSignal )
   /\ WF_Vars( Finish_ReceivingReleaseSignal )
-\*  /\ WF_Vars( LocalFinish_ForkingLocalTask )
   /\ WF_Vars( LocalFinish_CreatingRemoteTask )
   /\ WF_Vars( LocalFinish_TerminatingTask )
-  /\ WF_Vars( LocalFinish_CountingDroppedTasksFromDeadPlace )
+  /\ WF_Vars( LocalFinish_MarkingDeadPlace )
   /\ WF_Vars( SendingTask )
   /\ WF_Vars( DroppingTask )
   /\ WF_Vars( ReceivingTask )
@@ -870,7 +819,7 @@ Liveness ==
   /\ WF_Vars( Store_ReceivingTransitSignal )
   /\ WF_Vars( Store_ReceivingTerminateTaskSignal )
   /\ WF_Vars( Store_ReceivingTerminateGhostSignal )
-  /\ WF_Vars( Store_MarkingGhostChildrenAsAdopted )
+  /\ WF_Vars( Store_FindingGhostChildren )
   /\ WF_Vars( Store_AddingGhostChildren )
   /\ WF_Vars( Store_CancellingTasksToDeadPlace )
   /\ WF_Vars( Store_SendingCountDroppedSignalToLocalFinish )
@@ -884,5 +833,5 @@ Liveness ==
 (***************************************************************************)          
 Spec ==  Init /\ [][Next]_Vars /\ Liveness
 
-THEOREM Spec => []( TypeOK /\ StateOK)
+THEOREM Spec => []( TypeOK )
 =============================================================================
