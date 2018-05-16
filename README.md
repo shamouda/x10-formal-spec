@@ -13,5 +13,5 @@ Old spcifications in the attic folder include:
 We use TLA+ version 1.5.6 for verifying our models. We avoid using earlier versions since they are impacted by a serious verification bug according to [1]. <br />
 
 References: <br />
-[1] TLA+ website: http://lamport.azurewebsites.net/tla/tla.html
+[1] TLA+ website: http://lamport.azurewebsites.net/tla/tla.html <br />
 [2] Resilient X10: Efficient failure-aware programming. David Cunningham, David Grove, Benjamin Herta, Arun Iyengar, Kiyokuni Kawachiya, Hiroki Murata, Vijay Saraswat, Mikio Takeuchi, Olivier Tardieu. Proceedings of the ACM SIGPLAN Symposium on Principles and Practice of Parallel Programming (PPoPP'14), Feb 2014.
